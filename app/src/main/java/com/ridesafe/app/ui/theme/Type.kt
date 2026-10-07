@@ -6,47 +6,59 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
-val Typography = Typography(
+// ── PackSync type scale ─────────────────────────────────────────────────
+// System sans-serif (SF Pro / Roboto depending on platform).
+// 3 weights: 400 (Normal), 500 (Medium), 600 (SemiBold). Sentence case everywhere.
+// Monospace reserved for convoy codes only (applied inline, not in the type scale).
+
+val PackSyncTypography = Typography(
+    // Title — screen title "Hi, Safiur" (30/36, 600)
     headlineLarge = TextStyle(
         fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.Bold,
-        fontSize = 28.sp,
-        color = TextPrimary
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 30.sp,
+        lineHeight = 36.sp
     ),
-    headlineMedium = TextStyle(
-        fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.Bold,
-        fontSize = 22.sp,
-        color = TextPrimary
-    ),
+    // Headline — section headers (18/24, 600)
     titleLarge = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.SemiBold,
         fontSize = 18.sp,
-        color = TextPrimary
+        lineHeight = 24.sp
     ),
-    titleMedium = TextStyle(
-        fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 15.sp,
-        color = TextPrimary
-    ),
+    // Body — helper text, descriptions (16/24, 400)
     bodyLarge = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Normal,
-        fontSize = 15.sp,
-        color = TextPrimary
+        fontSize = 16.sp,
+        lineHeight = 24.sp
     ),
+    // Body medium — button labels (16/24, 500)
     bodyMedium = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Medium,
+        fontSize = 16.sp,
+        lineHeight = 24.sp
+    ),
+    // Caption — timestamps, version (13/18, 400)
+    bodySmall = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Normal,
         fontSize = 13.sp,
-        color = TextSecondary
+        lineHeight = 18.sp
     ),
+    // Label — small section labels, one consistent style (12/16, 500)
+    labelMedium = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Medium,
+        fontSize = 12.sp,
+        lineHeight = 16.sp
+    ),
+    // Button text (16/24, 600)
     labelLarge = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.SemiBold,
-        fontSize = 14.sp,
-        color = TextPrimary
+        fontSize = 16.sp,
+        lineHeight = 24.sp
     )
 )
