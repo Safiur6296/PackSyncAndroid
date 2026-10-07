@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -37,7 +38,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.MoreVert
@@ -52,6 +52,8 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -68,7 +70,11 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
@@ -93,16 +99,30 @@ import com.ridesafe.app.ui.theme.PackSyncTheme
 import com.ridesafe.app.ui.theme.RideSafeTheme
 import com.ridesafe.app.util.PermissionHelper
 
-// ── Constants ───────────────────────────────────────────────────────────
+// ── Spacing Tokens ──────────────────────────────────────────────────────
 private val ScreenHPadding = 20.dp
-private val SectionGap = 28.dp
-private val GroupGap = 12.dp
+private val SectionGap = 32.dp
+private val SectionContentGap = 12.dp
 private val ButtonRadius = 12.dp
 private val SurfaceRadius = 16.dp
-private val CodeCellRadius = 10.dp
+private val CodeCellRadius = 12.dp
 private val PrimaryButtonHeight = 56.dp
-private val CompactButtonHeight = 48.dp
 private val MinTapTarget = 48.dp
+
+/**
+ * Formats user greeting:
+ * - Default / empty: "Hi, there"
+ * - Full name: uses first name only ("John Doe" -> "Hi, John")
+ * - Truncation: names longer than 20 characters truncated with ellipsis
+ */
+fun formatGreeting(name: String): String {
+    val trimmed = name.trim()
+    if (trimmed.isEmpty()) return "Hi, there"
+    val firstName = trimmed.split("\\s+".toRegex()).firstOrNull()?.trim().orEmpty()
+    if (firstName.isEmpty()) return "Hi, there"
+    val displayName = if (firstName.length > 20) "${firstName.take(20)}…" else firstName
+    return "Hi, $displayName"
+}
 
 /**
  * HomeScreen handles rider onboarding: entering a rider name, creating a new ride,
@@ -222,7 +242,14 @@ fun HomeScreenContent(
 ) {
     val colors = PackSyncTheme.colors
     val focusManager = LocalFocusManager.current
+    val clipboardManager = LocalClipboardManager.current
+    val context = LocalContext.current
+
     var sessionToDelete by remember { mutableStateOf<LocalRideSessionUi?>(null) }
+    var showAboutSheet by remember { mutableStateOf(false) }
+    var showNameEditor by remember { mutableStateOf(false) }
+    var tempNameInput by remember { mutableStateOf("") }
+    var isSignedUp by remember { mutableStateOf(false) }
 
     // Delete confirmation dialog
     if (sessionToDelete != null) {
@@ -254,11 +281,131 @@ fun HomeScreenContent(
                     ),
                     shape = RoundedCornerShape(ButtonRadius)
                 ) {
-                    Text("Remove", fontWeight = FontWeight.SemiBold)
+                    Text("Remove", fontWeight = FontWeight.SemiBold, color = colors.primaryButtonBg)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { sessionToDelete = null }) {
+                    Text("Cancel", color = colors.textSecondary)
+                }
+            },
+            containerColor = colors.surface,
+            shape = RoundedCornerShape(SurfaceRadius)
+        )
+    }
+
+    // About Sheet modal dialog
+    if (showAboutSheet) {
+        AlertDialog(
+            onDismissRequest = { showAboutSheet = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    PackSyncLogoMark(modifier = Modifier.size(28.dp))
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = "PackSync",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = colors.textPrimary
+                    )
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "v${BuildConfig.VERSION_NAME.ifEmpty { "1.0.24" }}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.textTertiary
+                    )
+                    Text(
+                        text = "Real-time convoy tracking for group motorcycle rides. Share a 6-letter code to ride in sync.",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = colors.textSecondary
+                    )
+                    Text(
+                        text = "Crafted for quick glanceability and glove-friendly operation.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.textTertiary
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showAboutSheet = false
+                        onCheckForUpdates()
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = colors.primaryButtonBg,
+                        contentColor = colors.primaryButtonText
+                    ),
+                    shape = RoundedCornerShape(ButtonRadius)
+                ) {
+                    Text("Check for updates", style = MaterialTheme.typography.labelLarge)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAboutSheet = false }) {
+                    Text("Close", color = colors.textSecondary, style = MaterialTheme.typography.bodyMedium)
+                }
+            },
+            containerColor = colors.surface,
+            shape = RoundedCornerShape(SurfaceRadius)
+        )
+    }
+
+    // Name editor dialog
+    if (showNameEditor) {
+        AlertDialog(
+            onDismissRequest = { showNameEditor = false },
+            title = {
+                Text(
+                    text = "Rider Callsign",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = colors.textPrimary
+                )
+            },
+            text = {
+                Column {
+                    Text(
+                        text = "Enter your name or handle. Other riders in the convoy will see this.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.textSecondary
+                    )
+                    Spacer(modifier = Modifier.height(14.dp))
+                    OutlinedTextField(
+                        value = tempNameInput,
+                        onValueChange = { tempNameInput = it },
+                        placeholder = { Text("Your name", color = colors.textTertiary) },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = colors.textPrimary,
+                            unfocusedBorderColor = colors.border,
+                            focusedContainerColor = colors.surfaceRaised,
+                            unfocusedContainerColor = colors.surfaceRaised,
+                            cursorColor = colors.textPrimary
+                        ),
+                        shape = RoundedCornerShape(ButtonRadius),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onRiderNameChange(tempNameInput.trim())
+                        showNameEditor = false
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = colors.primaryButtonBg,
+                        contentColor = colors.primaryButtonText
+                    ),
+                    shape = RoundedCornerShape(ButtonRadius)
+                ) {
+                    Text("Save", style = MaterialTheme.typography.labelLarge)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showNameEditor = false }) {
                     Text("Cancel", color = colors.textSecondary)
                 }
             },
@@ -278,10 +425,22 @@ fun HomeScreenContent(
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = ScreenHPadding)
         ) {
-            Spacer(modifier = Modifier.height(56.dp)) // safe area
+            Spacer(modifier = Modifier.height(56.dp)) // Safe area top
 
-            // ── 1. Header: logo mark + wordmark ─────────────────────────────
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            // ── 1. Header and Logo Lockup ───────────────────────────────────
+            // Top left, 20px margin, PackSync mark (28px), 10px gap, wordmark in Headline style.
+            // Vertically centered, right side empty. Min tap target 48px, opens About sheet.
+            Row(
+                modifier = Modifier
+                    .heightIn(min = MinTapTarget)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) {
+                        showAboutSheet = true
+                    },
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 PackSyncLogoMark(modifier = Modifier.size(28.dp))
                 Spacer(modifier = Modifier.width(10.dp))
                 Text(
@@ -291,17 +450,42 @@ fun HomeScreenContent(
                 )
             }
 
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // ── 2. Greeting and Sign-up ─────────────────────────────────────
+            // Title below header: "Hi, there" default / "Hi, {name}".
+            // Tap greeting to edit callsign.
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = formatGreeting(uiState.riderName),
+                    style = MaterialTheme.typography.headlineLarge,
+                    color = colors.textPrimary,
+                    modifier = Modifier.clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) {
+                        tempNameInput = uiState.riderName
+                        showNameEditor = true
+                    }
+                )
+
+                if (!isSignedUp) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Sign up free",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.textSecondary,
+                        modifier = Modifier.clickable {
+                            isSignedUp = true
+                            Toast.makeText(context, "Account ready", Toast.LENGTH_SHORT).show()
+                        }
+                    )
+                }
+            }
+
             Spacer(modifier = Modifier.height(SectionGap))
 
-            // ── 2. Greeting / callsign ──────────────────────────────────────
-            CallsignGreeting(
-                riderName = uiState.riderName,
-                onRiderNameChange = onRiderNameChange
-            )
-
-            Spacer(modifier = Modifier.height(SectionGap))
-
-            // ── Permission banner ───────────────────────────────────────────
+            // ── Permission Banner ───────────────────────────────────────────
             AnimatedVisibility(
                 visible = !hasPermissions,
                 enter = fadeIn() + expandVertically(),
@@ -350,13 +534,21 @@ fun HomeScreenContent(
                 }
             }
 
-            // ── 3. Start a ride ─────────────────────────────────────────────
+            // ── 3. Section 1: Start a Ride ──────────────────────────────────
             Text(
                 text = "Start a ride",
                 style = MaterialTheme.typography.titleLarge,
                 color = colors.textPrimary
             )
-            Spacer(modifier = Modifier.height(GroupGap))
+            Spacer(modifier = Modifier.height(SectionContentGap))
+
+            // Helper text directly under header
+            Text(
+                text = "Share a 6-letter code with your pack for live GPS tracking.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.textSecondary
+            )
+            Spacer(modifier = Modifier.height(16.dp))
 
             // Primary CTA: Plan route & create ride
             PrimaryButton(
@@ -369,9 +561,9 @@ fun HomeScreenContent(
                 enabled = !uiState.isCreatingRide && !uiState.isJoiningRide && uiState.rejoiningCode == null
             )
 
-            Spacer(modifier = Modifier.height(GroupGap))
+            Spacer(modifier = Modifier.height(SectionContentGap))
 
-            // Secondary CTA: Quick start without a route
+            // Secondary quiet text button: Quick start without a route
             TextButton(
                 onClick = {
                     focusManager.clearFocus()
@@ -383,37 +575,62 @@ fun HomeScreenContent(
                 Text(
                     text = "Quick start without a route",
                     color = colors.textSecondary,
-                    style = MaterialTheme.typography.bodyMedium
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = TextAlign.Center
                 )
             }
 
-            Text(
-                text = "Share a 6-letter code with your pack for live GPS tracking.",
-                style = MaterialTheme.typography.bodySmall,
-                color = colors.textTertiary
-            )
-
+            Spacer(modifier = Modifier.height(SectionGap))
+            HorizontalDivider(thickness = 1.dp, color = colors.border)
             Spacer(modifier = Modifier.height(SectionGap))
 
-            // ── 4. Join a convoy ────────────────────────────────────────────
-            Text(
-                text = "Join a convoy",
-                style = MaterialTheme.typography.titleLarge,
-                color = colors.textPrimary
-            )
-            Spacer(modifier = Modifier.height(GroupGap))
+            // ── 4. Section 2: Join a Convoy ─────────────────────────────────
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Join a convoy",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = colors.textPrimary
+                )
 
+                // Paste button right-aligned on header row
+                Text(
+                    text = "Paste",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.textSecondary,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier
+                        .clickable {
+                            val clipText = clipboardManager.getText()?.text.orEmpty()
+                            val cleaned = clipText.trim().uppercase().filter { it.isLetterOrDigit() }.take(6)
+                            if (cleaned.isNotEmpty()) {
+                                onJoinCodeChange(cleaned)
+                                focusManager.clearFocus()
+                                Toast.makeText(context, "Pasted \"$cleaned\"", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(context, "Clipboard is empty", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                        .padding(horizontal = 8.dp, vertical = 6.dp)
+                )
+            }
+            Spacer(modifier = Modifier.height(SectionContentGap))
+
+            // 6-box segmented code input (single transparent source of truth)
             SegmentedCodeInput(
                 code = uiState.joinCode,
                 onCodeChange = onJoinCodeChange
             )
 
-            Spacer(modifier = Modifier.height(GroupGap))
+            Spacer(modifier = Modifier.height(SectionContentGap))
 
-            // Join button — active only when 6 chars entered
-            val joinEnabled = uiState.joinCode.length >= 6 &&
+            // Full-width primary Join button, disabled until 6 chars entered
+            val joinEnabled = uiState.joinCode.length == 6 &&
                     !uiState.isCreatingRide && !uiState.isJoiningRide && uiState.rejoiningCode == null
-            JoinButton(
+            JoinConvoyButton(
                 onClick = {
                     focusManager.clearFocus()
                     onJoinRide()
@@ -422,9 +639,8 @@ fun HomeScreenContent(
                 isLoading = uiState.isJoiningRide
             )
 
-            // Error message
             if (uiState.errorMessage != null) {
-                Spacer(modifier = Modifier.height(GroupGap))
+                Spacer(modifier = Modifier.height(SectionContentGap))
                 Text(
                     text = uiState.errorMessage ?: "",
                     color = colors.destructiveRed,
@@ -434,8 +650,10 @@ fun HomeScreenContent(
             }
 
             Spacer(modifier = Modifier.height(SectionGap))
+            HorizontalDivider(thickness = 1.dp, color = colors.border)
+            Spacer(modifier = Modifier.height(SectionGap))
 
-            // ── 5. Recent convoys ───────────────────────────────────────────
+            // ── 5. Section 3: Recent Convoys ────────────────────────────────
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -469,10 +687,9 @@ fun HomeScreenContent(
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(SectionContentGap))
 
             if (uiState.isLoadingSessions) {
-                // Skeleton loading rows
                 repeat(2) {
                     SkeletonSessionRow()
                     if (it < 1) {
@@ -484,19 +701,18 @@ fun HomeScreenContent(
                     }
                 }
             } else if (uiState.sessions.isEmpty()) {
-                // Empty state with dot motif
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(vertical = 32.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    DotMotif(modifier = Modifier.size(32.dp))
+                    DotMotif(modifier = Modifier.size(28.dp))
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
-                        text = "No rides yet",
+                        text = "No recent convoys",
                         style = MaterialTheme.typography.bodyLarge,
-                        color = colors.textTertiary
+                        color = colors.textSecondary
                     )
                 }
             } else {
@@ -526,7 +742,7 @@ fun HomeScreenContent(
 
             // ── 6. Footer ───────────────────────────────────────────────────
             Text(
-                text = "v${BuildConfig.VERSION_NAME} · Check for updates",
+                text = "v${BuildConfig.VERSION_NAME.ifEmpty { "1.0.24" }} · Check for updates",
                 style = MaterialTheme.typography.bodySmall,
                 color = colors.textTertiary,
                 modifier = Modifier
@@ -537,10 +753,10 @@ fun HomeScreenContent(
                 textAlign = TextAlign.Center
             )
 
-            Spacer(modifier = Modifier.height(32.dp)) // bottom safe area
+            Spacer(modifier = Modifier.height(32.dp)) // Safe area bottom
         }
 
-        // Full-page Plan Trip Modal
+        // Plan Trip Modal overlay
         AnimatedVisibility(
             visible = uiState.isTripPlannerOpen,
             enter = fadeIn() + slideInVertically(initialOffsetY = { it }),
@@ -581,52 +797,52 @@ fun HomeScreenContent(
 // ═══════════════════════════════════════════════════════════════════════
 
 /**
- * Geometric logo mark — the dot-arrow motif from the PackSync brand.
- * Drawn with Canvas for zero-dependency, scalable rendering.
+ * Geometric PackSync mark — 6-rider formation with forward lead vector arrow.
+ * Rendered with vector Canvas for zero runtime asset dependency.
  */
 @Composable
-private fun PackSyncLogoMark(modifier: Modifier = Modifier) {
-    val color = PackSyncTheme.colors.textPrimary
+fun PackSyncLogoMark(
+    modifier: Modifier = Modifier,
+    tint: Color = PackSyncTheme.colors.logoFill
+) {
     androidx.compose.foundation.Canvas(modifier = modifier) {
         val w = size.width
         val h = size.height
-        val dotR = w * 0.065f
 
-        // 3x3 triangular dot cluster (bottom-left)
+        val dotR = w * 0.065f
+        val gridStep = w * 0.18f
+        val offsetX = w * 0.12f
+        val offsetY = h * 0.28f
+
+        // 3-2-1 triangle formation
         val dots = listOf(
-            // row 0 (bottom) — 3 dots
             0f to 2f, 1f to 2f, 2f to 2f,
-            // row 1 (middle) — 2 dots
             0f to 1f, 1f to 1f,
-            // row 2 (top) — 1 dot
             0f to 0f
         )
-        val gridStep = w * 0.18f
-        val offsetX = w * 0.08f
-        val offsetY = h * 0.25f
         dots.forEach { (col, row) ->
             drawCircle(
-                color = color,
+                color = tint,
                 radius = dotR,
-                center = androidx.compose.ui.geometry.Offset(
-                    offsetX + col * gridStep + gridStep / 2,
-                    offsetY + row * gridStep + gridStep / 2
+                center = Offset(
+                    offsetX + col * gridStep,
+                    offsetY + row * gridStep
                 )
             )
         }
 
-        // Arrow — pointing top-right
-        val arrowPath = androidx.compose.ui.graphics.Path().apply {
-            moveTo(w * 0.42f, h * 0.78f)
-            lineTo(w * 0.88f, h * 0.22f)
-            lineTo(w * 0.88f, h * 0.50f)
-            moveTo(w * 0.88f, h * 0.22f)
-            lineTo(w * 0.60f, h * 0.22f)
+        // Convoy lead arrow
+        val arrowPath = Path().apply {
+            moveTo(w * 0.40f, h * 0.74f)
+            lineTo(w * 0.86f, h * 0.22f)
+            lineTo(w * 0.86f, h * 0.50f)
+            moveTo(w * 0.86f, h * 0.22f)
+            lineTo(w * 0.58f, h * 0.22f)
         }
         drawPath(
             path = arrowPath,
-            color = color,
-            style = androidx.compose.ui.graphics.drawscope.Stroke(
+            color = tint,
+            style = Stroke(
                 width = w * 0.09f,
                 cap = androidx.compose.ui.graphics.StrokeCap.Round,
                 join = androidx.compose.ui.graphics.StrokeJoin.Round
@@ -645,104 +861,14 @@ private fun DotMotif(modifier: Modifier = Modifier) {
         val w = size.width
         val dotR = w * 0.08f
         val cx = w / 2f
-        // Triangle: 1 dot top, 2 dots bottom
-        drawCircle(color = color, radius = dotR, center = androidx.compose.ui.geometry.Offset(cx, w * 0.25f))
-        drawCircle(color = color, radius = dotR, center = androidx.compose.ui.geometry.Offset(cx - w * 0.15f, w * 0.65f))
-        drawCircle(color = color, radius = dotR, center = androidx.compose.ui.geometry.Offset(cx + w * 0.15f, w * 0.65f))
+        drawCircle(color = color, radius = dotR, center = Offset(cx, w * 0.25f))
+        drawCircle(color = color, radius = dotR, center = Offset(cx - w * 0.18f, w * 0.65f))
+        drawCircle(color = color, radius = dotR, center = Offset(cx + w * 0.18f, w * 0.65f))
     }
 }
 
 /**
- * Greeting title that doubles as inline callsign editor.
- * Tap the name to enter edit mode (bottom sheet not needed for this simple case).
- */
-@Composable
-private fun CallsignGreeting(
-    riderName: String,
-    onRiderNameChange: (String) -> Unit
-) {
-    val colors = PackSyncTheme.colors
-    var isEditing by remember { mutableStateOf(false) }
-    val focusRequester = remember { FocusRequester() }
-
-    if (isEditing || riderName.isBlank()) {
-        // Inline edit mode
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text(
-                text = "Hi, ",
-                style = MaterialTheme.typography.headlineLarge,
-                color = colors.textPrimary
-            )
-            BasicTextField(
-                value = riderName,
-                onValueChange = onRiderNameChange,
-                singleLine = true,
-                textStyle = TextStyle(
-                    fontSize = 30.sp,
-                    lineHeight = 36.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = colors.textPrimary
-                ),
-                cursorBrush = SolidColor(colors.textPrimary),
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(onDone = {
-                    if (riderName.isNotBlank()) isEditing = false
-                }),
-                modifier = Modifier
-                    .weight(1f)
-                    .focusRequester(focusRequester)
-                    .onFocusChanged { if (!it.isFocused && riderName.isNotBlank()) isEditing = false },
-                decorationBox = { inner ->
-                    Box {
-                        if (riderName.isEmpty()) {
-                            Text(
-                                text = "your name",
-                                style = TextStyle(
-                                    fontSize = 30.sp,
-                                    lineHeight = 36.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = colors.textTertiary
-                                )
-                            )
-                        }
-                        inner()
-                    }
-                    // Underline
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 40.dp)
-                            .height(2.dp)
-                            .background(colors.border)
-                    )
-                }
-            )
-        }
-        // Auto-focus when entering edit mode
-        if (isEditing) {
-            androidx.compose.runtime.LaunchedEffect(Unit) {
-                focusRequester.requestFocus()
-            }
-        }
-    } else {
-        // Display mode — tap to edit
-        Text(
-            text = "Hi, $riderName",
-            style = MaterialTheme.typography.headlineLarge,
-            color = colors.textPrimary,
-            modifier = Modifier.clickable(
-                indication = null,
-                interactionSource = remember { MutableInteractionSource() }
-            ) { isEditing = true }
-        )
-    }
-}
-
-/**
- * Full-width primary button with pressed-state scale animation.
+ * Full-width primary button with pressed scale animation.
  */
 @Composable
 private fun PrimaryButton(
@@ -769,7 +895,9 @@ private fun PrimaryButton(
         shape = RoundedCornerShape(ButtonRadius),
         colors = ButtonDefaults.buttonColors(
             containerColor = colors.primaryButtonBg,
-            disabledContainerColor = colors.primaryButtonBg.copy(alpha = 0.38f)
+            contentColor = colors.primaryButtonText,
+            disabledContainerColor = colors.surfaceRaised,
+            disabledContentColor = colors.textTertiary
         ),
         enabled = enabled && !isLoading,
         interactionSource = interactionSource,
@@ -799,118 +927,11 @@ private fun PrimaryButton(
 }
 
 /**
- * Segmented 6-box convoy code input with paste button.
+ * Full-width Join Convoy button.
+ * Inverted primary when active; surface-raised fill and text-tertiary text when disabled.
  */
 @Composable
-private fun SegmentedCodeInput(
-    code: String,
-    onCodeChange: (String) -> Unit
-) {
-    val colors = PackSyncTheme.colors
-    val focusManager = LocalFocusManager.current
-    val clipboardManager = LocalClipboardManager.current
-    val context = LocalContext.current
-    var isFocused by remember { mutableStateOf(false) }
-    val focusRequester = remember { FocusRequester() }
-
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        // Invisible text field that captures input
-        Box(modifier = Modifier.weight(1f)) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                for (i in 0 until 6) {
-                    val char = code.getOrNull(i)?.toString() ?: ""
-                    val isCurrent = i == code.length && isFocused
-
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(PrimaryButtonHeight)
-                            .clip(RoundedCornerShape(CodeCellRadius))
-                            .background(colors.surfaceRaised)
-                            .border(
-                                width = if (isCurrent) 1.5.dp else 1.dp,
-                                color = if (isCurrent) colors.textPrimary else colors.border,
-                                shape = RoundedCornerShape(CodeCellRadius)
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = char,
-                            style = TextStyle(
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Medium,
-                                fontSize = 18.sp,
-                                color = colors.textPrimary,
-                                textAlign = TextAlign.Center
-                            )
-                        )
-                    }
-                }
-            }
-
-            // Invisible input overlay
-            BasicTextField(
-                value = code,
-                onValueChange = { value ->
-                    val filtered = value.uppercase().filter { it.isLetterOrDigit() }.take(6)
-                    onCodeChange(filtered)
-                    if (filtered.length == 6) focusManager.clearFocus()
-                },
-                singleLine = true,
-                textStyle = TextStyle(color = colors.background), // invisible
-                keyboardOptions = KeyboardOptions(
-                    capitalization = KeyboardCapitalization.Characters,
-                    imeAction = ImeAction.Done
-                ),
-                keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
-                cursorBrush = SolidColor(colors.background), // invisible cursor
-                modifier = Modifier
-                    .matchParentSize()
-                    .focusRequester(focusRequester)
-                    .onFocusChanged { isFocused = it.isFocused }
-            )
-        }
-
-        // Paste button
-        IconButton(
-            onClick = {
-                val clipText = clipboardManager.getText()?.text ?: ""
-                val cleaned = clipText.trim().uppercase().filter { it.isLetterOrDigit() }.take(6)
-                if (cleaned.isNotEmpty()) {
-                    onCodeChange(cleaned)
-                    focusManager.clearFocus()
-                    Toast.makeText(context, "Pasted \"$cleaned\"", Toast.LENGTH_SHORT).show()
-                } else {
-                    Toast.makeText(context, "Clipboard is empty", Toast.LENGTH_SHORT).show()
-                }
-            },
-            modifier = Modifier
-                .size(PrimaryButtonHeight)
-                .clip(RoundedCornerShape(CodeCellRadius))
-                .background(colors.surfaceRaised)
-        ) {
-            Icon(
-                imageVector = Icons.Default.ContentPaste,
-                contentDescription = "Paste code",
-                tint = colors.textSecondary,
-                modifier = Modifier.size(20.dp)
-            )
-        }
-    }
-}
-
-/**
- * Compact join button for the code entry section.
- */
-@Composable
-private fun JoinButton(
+private fun JoinConvoyButton(
     onClick: () -> Unit,
     enabled: Boolean,
     isLoading: Boolean = false
@@ -928,12 +949,14 @@ private fun JoinButton(
         onClick = onClick,
         modifier = Modifier
             .fillMaxWidth()
-            .height(CompactButtonHeight)
+            .height(PrimaryButtonHeight)
             .scale(scale),
         shape = RoundedCornerShape(ButtonRadius),
         colors = ButtonDefaults.buttonColors(
             containerColor = colors.primaryButtonBg,
-            disabledContainerColor = colors.primaryButtonBg.copy(alpha = 0.38f)
+            contentColor = colors.primaryButtonText,
+            disabledContainerColor = colors.surfaceRaised,
+            disabledContentColor = colors.textTertiary
         ),
         enabled = enabled && !isLoading,
         interactionSource = interactionSource,
@@ -949,9 +972,102 @@ private fun JoinButton(
             Text(
                 text = "Join Convoy",
                 style = MaterialTheme.typography.labelLarge,
-                color = colors.primaryButtonText
+                color = if (enabled) colors.primaryButtonText else colors.textTertiary
             )
         }
+    }
+}
+
+/**
+ * Segmented 6-box convoy code input:
+ * - Exactly 6 visual boxes (no clipboard icon inside row).
+ * - A single hidden BasicTextField holds input state with ZERO ghost text overlay.
+ * - Forces uppercase and max 6 alphanumeric characters.
+ */
+@Composable
+private fun SegmentedCodeInput(
+    code: String,
+    onCodeChange: (String) -> Unit
+) {
+    val colors = PackSyncTheme.colors
+    val focusManager = LocalFocusManager.current
+    var isFocused by remember { mutableStateOf(false) }
+    val focusRequester = remember { FocusRequester() }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) {
+                focusRequester.requestFocus()
+            }
+    ) {
+        // Purely visual 6 boxes
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            for (i in 0 until 6) {
+                val char = code.getOrNull(i)?.toString().orEmpty()
+                val isCurrent = i == code.length && isFocused
+
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(PrimaryButtonHeight)
+                        .clip(RoundedCornerShape(CodeCellRadius))
+                        .background(colors.surfaceRaised)
+                        .border(
+                            width = if (isCurrent) 1.5.dp else 1.dp,
+                            color = if (isCurrent) colors.textPrimary else colors.border,
+                            shape = RoundedCornerShape(CodeCellRadius)
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = char,
+                        style = TextStyle(
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 18.sp,
+                            color = colors.textPrimary,
+                            textAlign = TextAlign.Center
+                        )
+                    )
+                }
+            }
+        }
+
+        // Single hidden BasicTextField capturing input without ghost text
+        BasicTextField(
+            value = code,
+            onValueChange = { value ->
+                val filtered = value.uppercase().filter { it.isLetterOrDigit() }.take(6)
+                onCodeChange(filtered)
+                if (filtered.length == 6) {
+                    focusManager.clearFocus()
+                }
+            },
+            singleLine = true,
+            textStyle = TextStyle(color = Color.Transparent, fontSize = 1.sp),
+            cursorBrush = SolidColor(Color.Transparent),
+            keyboardOptions = KeyboardOptions(
+                capitalization = KeyboardCapitalization.Characters,
+                imeAction = ImeAction.Done
+            ),
+            keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
+            modifier = Modifier
+                .matchParentSize()
+                .focusRequester(focusRequester)
+                .onFocusChanged { isFocused = it.isFocused },
+            decorationBox = { innerTextField ->
+                Box(modifier = Modifier.size(0.dp)) {
+                    innerTextField()
+                }
+            }
+        )
     }
 }
 
@@ -1008,7 +1124,7 @@ private fun SessionRow(
 
         Spacer(modifier = Modifier.width(12.dp))
 
-        // Join button (compact)
+        // Compact Join button
         val interactionSource = remember { MutableInteractionSource() }
         val isPressed by interactionSource.collectIsPressedAsState()
         val scale by animateFloatAsState(
@@ -1023,7 +1139,8 @@ private fun SessionRow(
                 .scale(scale),
             shape = RoundedCornerShape(ButtonRadius),
             colors = ButtonDefaults.buttonColors(
-                containerColor = if (sessionUi.isActive) colors.primaryButtonBg else colors.surfaceRaised
+                containerColor = colors.primaryButtonBg,
+                contentColor = colors.primaryButtonText
             ),
             contentPadding = PaddingValues(horizontal = 16.dp),
             enabled = !isRejoining,
@@ -1032,7 +1149,7 @@ private fun SessionRow(
             if (isRejoining) {
                 CircularProgressIndicator(
                     modifier = Modifier.size(14.dp),
-                    color = if (sessionUi.isActive) colors.primaryButtonText else colors.textSecondary,
+                    color = colors.primaryButtonText,
                     strokeWidth = 1.5.dp
                 )
             } else {
@@ -1040,7 +1157,7 @@ private fun SessionRow(
                     text = "Join",
                     style = MaterialTheme.typography.bodySmall,
                     fontWeight = FontWeight.SemiBold,
-                    color = if (sessionUi.isActive) colors.primaryButtonText else colors.textPrimary
+                    color = colors.primaryButtonText
                 )
             }
         }
@@ -1091,7 +1208,6 @@ private fun SessionRow(
 
 /**
  * Live status indicator — green dot + "Live" text.
- * Dot motif used with meaning: this convoy is active.
  */
 @Composable
 private fun LiveIndicator() {
@@ -1114,7 +1230,7 @@ private fun LiveIndicator() {
 }
 
 /**
- * Skeleton row for loading state — surfaceRaised pulsing bars.
+ * Skeleton row for loading state.
  */
 @Composable
 private fun SkeletonSessionRow() {
@@ -1153,7 +1269,7 @@ private fun SkeletonSessionRow() {
 }
 
 /**
- * Formats relative time (e.g., "Created 2h ago", "Joined yesterday").
+ * Formats relative timestamp for sessions.
  */
 private fun formatSessionTime(timestamp: Long, isHost: Boolean): String {
     val now = System.currentTimeMillis()
@@ -1169,23 +1285,23 @@ private fun formatSessionTime(timestamp: Long, isHost: Boolean): String {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// Previews
+// Previews (Zero hardcoded names, pure profile state)
 // ═══════════════════════════════════════════════════════════════════════
 
-@Preview(showBackground = true, backgroundColor = 0xFF0A0A0A, name = "Dark")
+@Preview(showBackground = true, backgroundColor = 0xFF0A0A0A, name = "Dark Home")
 @Composable
 private fun HomeScreenDarkPreview() {
     RideSafeTheme(darkTheme = true) {
         HomeScreenContent(
             uiState = HomeUiState(
-                riderName = "Safiur",
-                joinCode = "MOT",
+                riderName = "",
+                joinCode = "MOTO",
                 sessions = listOf(
                     LocalRideSessionUi(
                         session = LocalRideSession(
                             rideCode = "MOTO16",
                             riderId = "id1",
-                            riderName = "Safiur",
+                            riderName = "Alex",
                             timestamp = System.currentTimeMillis() - 15 * 60 * 1000L,
                             isHost = true
                         ),
@@ -1195,7 +1311,7 @@ private fun HomeScreenDarkPreview() {
                         session = LocalRideSession(
                             rideCode = "ROAD21",
                             riderId = "id2",
-                            riderName = "Safiur",
+                            riderName = "Rider",
                             timestamp = System.currentTimeMillis() - 3 * 86400 * 1000L,
                             isHost = false
                         ),
@@ -1212,20 +1328,20 @@ private fun HomeScreenDarkPreview() {
     }
 }
 
-@Preview(showBackground = true, backgroundColor = 0xFFFAFAFA, name = "Light")
+@Preview(showBackground = true, backgroundColor = 0xFFFAFAFA, name = "Light Home")
 @Composable
 private fun HomeScreenLightPreview() {
     RideSafeTheme(darkTheme = false) {
         HomeScreenContent(
             uiState = HomeUiState(
-                riderName = "Safiur",
-                joinCode = "MOT",
+                riderName = "Jordan",
+                joinCode = "",
                 sessions = listOf(
                     LocalRideSessionUi(
                         session = LocalRideSession(
                             rideCode = "MOTO16",
                             riderId = "id1",
-                            riderName = "Safiur",
+                            riderName = "Jordan",
                             timestamp = System.currentTimeMillis() - 15 * 60 * 1000L,
                             isHost = true
                         ),

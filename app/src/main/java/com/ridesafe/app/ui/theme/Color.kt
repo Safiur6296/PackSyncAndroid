@@ -16,6 +16,7 @@ val DarkTextSecondary = Color(0xFFA1A1A1)
 val DarkTextTertiary = Color(0xFF6B6B6B)
 val DarkPrimaryButtonBg = Color(0xFFFAFAFA)
 val DarkPrimaryButtonText = Color(0xFF0A0A0A)
+val DarkLogoFill = Color(0xFFFAFAFA)
 
 // Light theme
 val LightBackground = Color(0xFFFAFAFA)
@@ -27,6 +28,7 @@ val LightTextSecondary = Color(0xFF5C5C5C)
 val LightTextTertiary = Color(0xFF8A8A8A)
 val LightPrimaryButtonBg = Color(0xFF0A0A0A)
 val LightPrimaryButtonText = Color(0xFFFAFAFA)
+val LightLogoFill = Color(0xFF0A0A0A)
 
 // Functional — only for live-status dot and destructive actions
 val DarkLiveGreen = Color(0xFF30D158)

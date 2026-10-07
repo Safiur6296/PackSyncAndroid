@@ -27,6 +27,7 @@ data class PackSyncColors(
     val textTertiary: Color,
     val primaryButtonBg: Color,
     val primaryButtonText: Color,
+    val logoFill: Color,
     val liveGreen: Color,
     val destructiveRed: Color
 )
@@ -42,6 +43,7 @@ val LocalPackSyncColors = staticCompositionLocalOf {
         textTertiary = Color.Unspecified,
         primaryButtonBg = Color.Unspecified,
         primaryButtonText = Color.Unspecified,
+        logoFill = Color.Unspecified,
         liveGreen = Color.Unspecified,
         destructiveRed = Color.Unspecified
     )
@@ -57,6 +59,7 @@ private val DarkPackSyncColors = PackSyncColors(
     textTertiary = DarkTextTertiary,
     primaryButtonBg = DarkPrimaryButtonBg,
     primaryButtonText = DarkPrimaryButtonText,
+    logoFill = DarkLogoFill,
     liveGreen = DarkLiveGreen,
     destructiveRed = DarkDestructiveRed
 )
@@ -71,6 +74,7 @@ private val LightPackSyncColors = PackSyncColors(
     textTertiary = LightTextTertiary,
     primaryButtonBg = LightPrimaryButtonBg,
     primaryButtonText = LightPrimaryButtonText,
+    logoFill = LightLogoFill,
     liveGreen = LightLiveGreen,
     destructiveRed = LightDestructiveRed
 )

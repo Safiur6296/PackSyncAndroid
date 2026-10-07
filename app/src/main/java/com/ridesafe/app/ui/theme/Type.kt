@@ -12,7 +12,7 @@ import androidx.compose.ui.unit.sp
 // Monospace reserved for convoy codes only (applied inline, not in the type scale).
 
 val PackSyncTypography = Typography(
-    // Title — screen title "Hi, Safiur" (30/36, 600)
+    // Title — screen title "Hi, there" / "Hi, {name}" (30/36, 600)
     headlineLarge = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.SemiBold,
