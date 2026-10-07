@@ -36,8 +36,11 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.MoreVert
@@ -45,6 +48,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -62,8 +66,10 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
@@ -97,6 +103,7 @@ import com.ridesafe.app.data.model.LocalRideSessionUi
 import com.ridesafe.app.data.model.PlaceSuggestion
 import com.ridesafe.app.ui.theme.PackSyncTheme
 import com.ridesafe.app.ui.theme.RideSafeTheme
+import com.ridesafe.app.ui.theme.StatusAmber
 import com.ridesafe.app.util.PermissionHelper
 
 // ── Spacing Tokens ──────────────────────────────────────────────────────
@@ -179,11 +186,19 @@ fun HomeScreen(
                 onRequestPermissions()
                 return@HomeScreenContent
             }
+            if (uiState.riderName.trim().isBlank()) {
+                Toast.makeText(context, "Please enter your name first", Toast.LENGTH_SHORT).show()
+                return@HomeScreenContent
+            }
             viewModel.createRide(context, onRideJoined)
         },
         onJoinRide = {
             if (!hasPermissions) {
                 onRequestPermissions()
+                return@HomeScreenContent
+            }
+            if (uiState.riderName.trim().isBlank()) {
+                Toast.makeText(context, "Please enter your name first", Toast.LENGTH_SHORT).show()
                 return@HomeScreenContent
             }
             viewModel.joinRide(context, onRideJoined)
@@ -208,7 +223,9 @@ fun HomeScreen(
         onRetryRouteCalculation = viewModel::calculateRoute,
         onCreateRideWithRoute = {
             viewModel.createRideWithPlannedTrip(context, onRideJoined)
-        }
+        },
+        onCancelJoinRequest = viewModel::cancelJoinRequest,
+        onDismissDeclinedDialog = viewModel::dismissDeclinedDialog
     )
 }
 
@@ -238,18 +255,159 @@ fun HomeScreenContent(
     onClearStartPlace: () -> Unit = {},
     onClearDestPlace: () -> Unit = {},
     onRetryRouteCalculation: () -> Unit = {},
-    onCreateRideWithRoute: () -> Unit = {}
+    onCreateRideWithRoute: () -> Unit = {},
+    onCancelJoinRequest: () -> Unit = {},
+    onDismissDeclinedDialog: () -> Unit = {}
 ) {
     val colors = PackSyncTheme.colors
     val focusManager = LocalFocusManager.current
     val clipboardManager = LocalClipboardManager.current
     val context = LocalContext.current
 
+    val scrollState = rememberScrollState()
+    val coroutineScope = rememberCoroutineScope()
+
     var sessionToDelete by remember { mutableStateOf<LocalRideSessionUi?>(null) }
-    var showAboutSheet by remember { mutableStateOf(false) }
-    var showNameEditor by remember { mutableStateOf(false) }
-    var tempNameInput by remember { mutableStateOf("") }
-    var isSignedUp by remember { mutableStateOf(false) }
+
+    // ── Waiting for Leader Approval Dialog (Fix 2) ──
+    if (uiState.isWaitingForApproval) {
+        val minutes = uiState.approvalTimeRemaining / 60
+        val seconds = uiState.approvalTimeRemaining % 60
+        val timeFormatted = String.format("%d:%02d", minutes, seconds)
+
+        AlertDialog(
+            onDismissRequest = { /* Require explicit click on Cancel button */ },
+            shape = RoundedCornerShape(20.dp),
+            containerColor = colors.surfaceRaised,
+            title = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .background(StatusAmber.copy(alpha = 0.15f), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp,
+                            color = StatusAmber
+                        )
+                    }
+                    Text(
+                        text = "Waiting for Approval",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = colors.textPrimary,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Joining Convoy",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.textTertiary
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = uiState.pendingJoinCode,
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = StatusAmber,
+                        letterSpacing = 4.sp
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "The convoy leader or active riders must approve your request before you can join.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.textSecondary,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Text(
+                        text = "Auto-expiring in $timeFormatted",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = colors.textTertiary,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                OutlinedButton(
+                    onClick = onCancelJoinRequest,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = colors.destructiveRed
+                    ),
+                    border = BorderStroke(1.dp, colors.destructiveRed.copy(alpha = 0.5f))
+                ) {
+                    Text("Cancel Request", fontWeight = FontWeight.SemiBold)
+                }
+            }
+        )
+    }
+
+    // ── Leader Declined Pop-up Dialog (Fix 2) ──
+    if (uiState.declinedDialogMessage != null) {
+        AlertDialog(
+            onDismissRequest = onDismissDeclinedDialog,
+            shape = RoundedCornerShape(20.dp),
+            containerColor = colors.surfaceRaised,
+            title = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .background(colors.destructiveRed.copy(alpha = 0.15f), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = null,
+                            tint = colors.destructiveRed,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Text(
+                        text = "Request Declined",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = colors.textPrimary,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            },
+            text = {
+                Text(
+                    text = uiState.declinedDialogMessage ?: "The leader has declined your joing request",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = colors.textSecondary
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = onDismissDeclinedDialog,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = colors.primaryButtonBg,
+                        contentColor = colors.primaryButtonText
+                    )
+                ) {
+                    Text("OK", fontWeight = FontWeight.Bold)
+                }
+            }
+        )
+    }
 
     // Delete confirmation dialog
     if (sessionToDelete != null) {
@@ -294,126 +452,6 @@ fun HomeScreenContent(
         )
     }
 
-    // About Sheet modal dialog
-    if (showAboutSheet) {
-        AlertDialog(
-            onDismissRequest = { showAboutSheet = false },
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    PackSyncLogoMark(modifier = Modifier.size(28.dp))
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text(
-                        text = "PackSync",
-                        style = MaterialTheme.typography.titleLarge,
-                        color = colors.textPrimary
-                    )
-                }
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        text = "v${BuildConfig.VERSION_NAME.ifEmpty { "1.0.24" }}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = colors.textTertiary
-                    )
-                    Text(
-                        text = "Real-time convoy tracking for group motorcycle rides. Share a 6-letter code to ride in sync.",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = colors.textSecondary
-                    )
-                    Text(
-                        text = "Crafted for quick glanceability and glove-friendly operation.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = colors.textTertiary
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        showAboutSheet = false
-                        onCheckForUpdates()
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = colors.primaryButtonBg,
-                        contentColor = colors.primaryButtonText
-                    ),
-                    shape = RoundedCornerShape(ButtonRadius)
-                ) {
-                    Text("Check for updates", style = MaterialTheme.typography.labelLarge)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showAboutSheet = false }) {
-                    Text("Close", color = colors.textSecondary, style = MaterialTheme.typography.bodyMedium)
-                }
-            },
-            containerColor = colors.surface,
-            shape = RoundedCornerShape(SurfaceRadius)
-        )
-    }
-
-    // Name editor dialog
-    if (showNameEditor) {
-        AlertDialog(
-            onDismissRequest = { showNameEditor = false },
-            title = {
-                Text(
-                    text = "Rider Callsign",
-                    style = MaterialTheme.typography.titleLarge,
-                    color = colors.textPrimary
-                )
-            },
-            text = {
-                Column {
-                    Text(
-                        text = "Enter your name or handle. Other riders in the convoy will see this.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = colors.textSecondary
-                    )
-                    Spacer(modifier = Modifier.height(14.dp))
-                    OutlinedTextField(
-                        value = tempNameInput,
-                        onValueChange = { tempNameInput = it },
-                        placeholder = { Text("Your name", color = colors.textTertiary) },
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = colors.textPrimary,
-                            unfocusedBorderColor = colors.border,
-                            focusedContainerColor = colors.surfaceRaised,
-                            unfocusedContainerColor = colors.surfaceRaised,
-                            cursorColor = colors.textPrimary
-                        ),
-                        shape = RoundedCornerShape(ButtonRadius),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        onRiderNameChange(tempNameInput.trim())
-                        showNameEditor = false
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = colors.primaryButtonBg,
-                        contentColor = colors.primaryButtonText
-                    ),
-                    shape = RoundedCornerShape(ButtonRadius)
-                ) {
-                    Text("Save", style = MaterialTheme.typography.labelLarge)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showNameEditor = false }) {
-                    Text("Cancel", color = colors.textSecondary)
-                }
-            },
-            containerColor = colors.surface,
-            shape = RoundedCornerShape(SurfaceRadius)
-        )
-    }
-
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -422,14 +460,14 @@ fun HomeScreenContent(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(scrollState)
                 .padding(horizontal = ScreenHPadding)
         ) {
             Spacer(modifier = Modifier.height(56.dp)) // Safe area top
 
             // ── 1. Header and Logo Lockup ───────────────────────────────────
             // Top left, 20px margin, PackSync mark (28px), 10px gap, wordmark in Headline style.
-            // Vertically centered, right side empty. Min tap target 48px, opens About sheet.
+            // Vertically centered, right side empty. Tap scrolls to top.
             Row(
                 modifier = Modifier
                     .heightIn(min = MinTapTarget)
@@ -437,7 +475,9 @@ fun HomeScreenContent(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null
                     ) {
-                        showAboutSheet = true
+                        coroutineScope.launch {
+                            scrollState.animateScrollTo(0)
+                        }
                     },
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -452,36 +492,14 @@ fun HomeScreenContent(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // ── 2. Greeting and Sign-up ─────────────────────────────────────
+            // ── 2. Greeting ─────────────────────────────────────────────────
             // Title below header: "Hi, there" default / "Hi, {name}".
-            // Tap greeting to edit callsign.
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    text = formatGreeting(uiState.riderName),
-                    style = MaterialTheme.typography.headlineLarge,
-                    color = colors.textPrimary,
-                    modifier = Modifier.clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null
-                    ) {
-                        tempNameInput = uiState.riderName
-                        showNameEditor = true
-                    }
-                )
-
-                if (!isSignedUp) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "Sign up free",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = colors.textSecondary,
-                        modifier = Modifier.clickable {
-                            isSignedUp = true
-                            Toast.makeText(context, "Account ready", Toast.LENGTH_SHORT).show()
-                        }
-                    )
-                }
-            }
+            // Updates in real time as the rider enters their callsign in the field below.
+            Text(
+                text = formatGreeting(uiState.riderName),
+                style = MaterialTheme.typography.headlineLarge,
+                color = colors.textPrimary
+            )
 
             Spacer(modifier = Modifier.height(SectionGap))
 
@@ -534,50 +552,100 @@ fun HomeScreenContent(
                 }
             }
 
-            // ── 3. Section 1: Start a Ride ──────────────────────────────────
-            Text(
-                text = "Start a ride",
-                style = MaterialTheme.typography.titleLarge,
-                color = colors.textPrimary
-            )
-            Spacer(modifier = Modifier.height(SectionContentGap))
-
-            // Helper text directly under header
-            Text(
-                text = "Share a 6-letter code with your pack for live GPS tracking.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = colors.textSecondary
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Primary CTA: Plan route & create ride
-            PrimaryButton(
-                text = "Plan route & create ride",
-                onClick = {
-                    focusManager.clearFocus()
-                    onPlanRoute()
-                },
-                isLoading = uiState.isCreatingRide,
-                enabled = !uiState.isCreatingRide && !uiState.isJoiningRide && uiState.rejoiningCode == null
-            )
-
-            Spacer(modifier = Modifier.height(SectionContentGap))
-
-            // Secondary quiet text button: Quick start without a route
-            TextButton(
-                onClick = {
-                    focusManager.clearFocus()
-                    onQuickStartRide()
-                },
-                modifier = Modifier.fillMaxWidth(),
-                contentPadding = PaddingValues(vertical = 12.dp)
+            // ── 3. Section 1: Start a Ride Container ────────────────────────
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(SurfaceRadius))
+                    .background(colors.surface)
+                    .border(1.dp, colors.border, RoundedCornerShape(SurfaceRadius))
+                    .padding(20.dp)
             ) {
                 Text(
-                    text = "Quick start without a route",
-                    color = colors.textSecondary,
-                    style = MaterialTheme.typography.bodyMedium,
-                    textAlign = TextAlign.Center
+                    text = "Start a ride",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = colors.textPrimary
                 )
+                Spacer(modifier = Modifier.height(4.dp))
+
+                // Helper text directly under header
+                Text(
+                    text = "Share a 6-letter code with your pack for live GPS tracking.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.textSecondary
+                )
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // Rider Callsign section before plan route
+                Text(
+                    text = "Rider Callsign",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = colors.textPrimary
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedTextField(
+                    value = uiState.riderName,
+                    onValueChange = onRiderNameChange,
+                    placeholder = {
+                        Text(
+                            text = "Enter your callsign or name",
+                            color = colors.textTertiary,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = colors.textPrimary,
+                        unfocusedTextColor = colors.textPrimary,
+                        focusedBorderColor = colors.textPrimary,
+                        unfocusedBorderColor = colors.border,
+                        focusedContainerColor = colors.surfaceRaised,
+                        unfocusedContainerColor = colors.surfaceRaised,
+                        cursorColor = colors.textPrimary
+                    ),
+                    shape = RoundedCornerShape(ButtonRadius),
+                    keyboardOptions = KeyboardOptions(
+                        capitalization = KeyboardCapitalization.Words,
+                        imeAction = ImeAction.Done
+                    ),
+                    keyboardActions = KeyboardActions(
+                        onDone = { focusManager.clearFocus() }
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                // Primary CTA: Plan route & create ride
+                PrimaryButton(
+                    text = "Plan route & create ride",
+                    onClick = {
+                        focusManager.clearFocus()
+                        onPlanRoute()
+                    },
+                    isLoading = uiState.isCreatingRide,
+                    enabled = !uiState.isCreatingRide && !uiState.isJoiningRide && uiState.rejoiningCode == null
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Secondary quiet text button: Quick start without a route
+                TextButton(
+                    onClick = {
+                        focusManager.clearFocus()
+                        onQuickStartRide()
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(vertical = 12.dp)
+                ) {
+                    Text(
+                        text = "Quick start without a route",
+                        color = colors.textSecondary,
+                        style = MaterialTheme.typography.bodyMedium,
+                        textAlign = TextAlign.Center
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(SectionGap))
@@ -596,26 +664,28 @@ fun HomeScreenContent(
                     color = colors.textPrimary
                 )
 
-                // Paste button right-aligned on header row
-                Text(
-                    text = "Paste",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = colors.textSecondary,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier
-                        .clickable {
-                            val clipText = clipboardManager.getText()?.text.orEmpty()
-                            val cleaned = clipText.trim().uppercase().filter { it.isLetterOrDigit() }.take(6)
-                            if (cleaned.isNotEmpty()) {
-                                onJoinCodeChange(cleaned)
-                                focusManager.clearFocus()
-                                Toast.makeText(context, "Pasted \"$cleaned\"", Toast.LENGTH_SHORT).show()
-                            } else {
-                                Toast.makeText(context, "Clipboard is empty", Toast.LENGTH_SHORT).show()
-                            }
+                // Paste icon button right-aligned on header row
+                IconButton(
+                    onClick = {
+                        val clipText = clipboardManager.getText()?.text.orEmpty()
+                        val cleaned = clipText.trim().uppercase().filter { it.isLetterOrDigit() }.take(6)
+                        if (cleaned.isNotEmpty()) {
+                            onJoinCodeChange(cleaned)
+                            focusManager.clearFocus()
+                            Toast.makeText(context, "Pasted \"$cleaned\"", Toast.LENGTH_SHORT).show()
+                        } else {
+                            Toast.makeText(context, "Clipboard is empty", Toast.LENGTH_SHORT).show()
                         }
-                        .padding(horizontal = 8.dp, vertical = 6.dp)
-                )
+                    },
+                    modifier = Modifier.size(MinTapTarget)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ContentPaste,
+                        contentDescription = "Paste ride code",
+                        tint = colors.textSecondary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
             Spacer(modifier = Modifier.height(SectionContentGap))
 
@@ -798,57 +868,19 @@ fun HomeScreenContent(
 
 /**
  * Geometric PackSync mark — 6-rider formation with forward lead vector arrow.
- * Rendered with vector Canvas for zero runtime asset dependency.
+ * Rendered from the official vector drawable asset.
  */
 @Composable
 fun PackSyncLogoMark(
     modifier: Modifier = Modifier,
     tint: Color = PackSyncTheme.colors.logoFill
 ) {
-    androidx.compose.foundation.Canvas(modifier = modifier) {
-        val w = size.width
-        val h = size.height
-
-        val dotR = w * 0.065f
-        val gridStep = w * 0.18f
-        val offsetX = w * 0.12f
-        val offsetY = h * 0.28f
-
-        // 3-2-1 triangle formation
-        val dots = listOf(
-            0f to 2f, 1f to 2f, 2f to 2f,
-            0f to 1f, 1f to 1f,
-            0f to 0f
-        )
-        dots.forEach { (col, row) ->
-            drawCircle(
-                color = tint,
-                radius = dotR,
-                center = Offset(
-                    offsetX + col * gridStep,
-                    offsetY + row * gridStep
-                )
-            )
-        }
-
-        // Convoy lead arrow
-        val arrowPath = Path().apply {
-            moveTo(w * 0.40f, h * 0.74f)
-            lineTo(w * 0.86f, h * 0.22f)
-            lineTo(w * 0.86f, h * 0.50f)
-            moveTo(w * 0.86f, h * 0.22f)
-            lineTo(w * 0.58f, h * 0.22f)
-        }
-        drawPath(
-            path = arrowPath,
-            color = tint,
-            style = Stroke(
-                width = w * 0.09f,
-                cap = androidx.compose.ui.graphics.StrokeCap.Round,
-                join = androidx.compose.ui.graphics.StrokeJoin.Round
-            )
-        )
-    }
+    Icon(
+        painter = androidx.compose.ui.res.painterResource(id = com.ridesafe.app.R.drawable.ic_packsync_mark),
+        contentDescription = "PackSync Logo",
+        modifier = modifier,
+        tint = tint
+    )
 }
 
 /**

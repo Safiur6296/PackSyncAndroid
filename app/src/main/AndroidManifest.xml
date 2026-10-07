@@ -59,6 +59,16 @@
             android:exported="false"
             android:foregroundServiceType="location" />
 
+        <!-- BroadcastReceiver for handling notification Approve/Decline actions -->
+        <receiver
+            android:name=".receiver.JoinRequestReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.ridesafe.app.ACTION_RESPOND_JOIN" />
+            </intent-filter>
+        </receiver>
+
         <!-- FileProvider to safely grant Android package installer access to downloaded APKs -->
         <provider
             android:name="androidx.core.content.FileProvider"

@@ -16,6 +16,7 @@ import com.ridesafe.app.data.network.PhotonApiClient
 import com.ridesafe.app.data.repository.RideRepository
 import com.ridesafe.app.data.repository.SessionPreferencesRepository
 import com.ridesafe.app.service.LocationTrackingService
+import com.ridesafe.app.util.JoinNotificationHelper
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -37,6 +38,11 @@ data class HomeUiState(
     val errorMessage: String? = null,
     val sessions: List<LocalRideSessionUi> = emptyList(),
     val isLoadingSessions: Boolean = true,
+    // Join Request Approval State (Fix 2)
+    val isWaitingForApproval: Boolean = false,
+    val pendingJoinCode: String = "",
+    val approvalTimeRemaining: Int = 120,
+    val declinedDialogMessage: String? = null,
     // Trip Planning State
     val isTripPlannerOpen: Boolean = false,
     val startLocationQuery: String = "",
@@ -70,6 +76,9 @@ class HomeViewModel(
     private var startSearchJob: Job? = null
     private var destSearchJob: Job? = null
     private var routeCalculationJob: Job? = null
+    private var joinRequestJob: Job? = null
+    private var joinTimeoutJob: Job? = null
+    private var pendingRiderId: String? = null
     private var cachedGpsLocation: Pair<Double, Double>? = null
 
     init {
@@ -505,8 +514,8 @@ class HomeViewModel(
             _uiState.update { it.copy(errorMessage = "Please enter your name first.") }
             return
         }
-        if (code.isEmpty()) {
-            _uiState.update { it.copy(errorMessage = "Please enter the ride code.") }
+        if (code.isEmpty() || code.length != 6) {
+            _uiState.update { it.copy(errorMessage = "Please enter a valid 6-character ride code.") }
             return
         }
 
@@ -514,40 +523,138 @@ class HomeViewModel(
 
         viewModelScope.launch {
             try {
-                val result = rideRepository.joinRide(code, name)
-                result.onSuccess { riderId ->
-                    android.util.Log.d("RideSafeDebug", "[Service] joinRide success: code=$code, riderId=$riderId. Starting LocationTrackingService...")
-                    // Save to local DataStore
-                    sessionPrefs.saveSession(
-                        LocalRideSession(
-                            rideCode = code,
-                            riderId = riderId,
-                            riderName = name,
-                            timestamp = System.currentTimeMillis(),
-                            isHost = false
+                // Request permission from the leader/riders (Fix 2)
+                val requestResult = rideRepository.requestToJoinRide(code, name)
+                requestResult.onSuccess { riderId ->
+                    pendingRiderId = riderId
+                    _uiState.update {
+                        it.copy(
+                            isJoiningRide = false,
+                            isWaitingForApproval = true,
+                            pendingJoinCode = code,
+                            approvalTimeRemaining = 120
                         )
-                    )
+                    }
 
-                    // Start background GPS tracking service
-                    LocationTrackingService.startTracking(
-                        context = context,
-                        rideCode = code,
-                        riderId = riderId,
-                        riderName = name
-                    )
-                    android.util.Log.d("RideSafeDebug", "[Service] LocationTrackingService.startTracking called for joiner. Navigating to map...")
+                    // 2-minute countdown timer (120 seconds)
+                    joinTimeoutJob?.cancel()
+                    joinTimeoutJob = viewModelScope.launch {
+                        for (sec in 119 downTo 0) {
+                            delay(1000L)
+                            _uiState.update { it.copy(approvalTimeRemaining = sec) }
+                        }
+                        // Expire after 2 minutes
+                        cancelJoinRequest()
+                        _uiState.update {
+                            it.copy(errorMessage = "Join request timed out. No response from convoy.")
+                        }
+                    }
 
-                    onRideJoined(code, riderId, name)
+                    // Listen in real-time for leader/rider approval or decline
+                    joinRequestJob?.cancel()
+                    joinRequestJob = viewModelScope.launch {
+                        rideRepository.observeJoinRequest(code, riderId).collect { req ->
+                            if (req == null || req.isCancelled) {
+                                return@collect
+                            }
+                            if (req.isApproved) {
+                                joinTimeoutJob?.cancel()
+                                joinRequestJob?.cancel()
+                                _uiState.update {
+                                    it.copy(
+                                        isWaitingForApproval = false,
+                                        pendingJoinCode = ""
+                                    )
+                                }
+
+                                // Complete the join operation in Firebase
+                                val completeRes = rideRepository.completeJoinRide(code, riderId, name)
+                                if (completeRes.isSuccess) {
+                                    // Save to local DataStore
+                                    sessionPrefs.saveSession(
+                                        LocalRideSession(
+                                            rideCode = code,
+                                            riderId = riderId,
+                                            riderName = name,
+                                            timestamp = System.currentTimeMillis(),
+                                            isHost = false
+                                        )
+                                    )
+
+                                    // Start background GPS tracking service
+                                    LocationTrackingService.startTracking(
+                                        context = context,
+                                        rideCode = code,
+                                        riderId = riderId,
+                                        riderName = name
+                                    )
+
+                                    onRideJoined(code, riderId, name)
+                                } else {
+                                    _uiState.update {
+                                        it.copy(errorMessage = "Failed to finalize joining convoy.")
+                                    }
+                                }
+                            } else if (req.isDeclined) {
+                                joinTimeoutJob?.cancel()
+                                joinRequestJob?.cancel()
+                                _uiState.update {
+                                    it.copy(
+                                        isWaitingForApproval = false,
+                                        pendingJoinCode = "",
+                                        declinedDialogMessage = "The leader has declined your joing request"
+                                    )
+                                }
+
+                                // Trigger Android system notification (Fix 2)
+                                JoinNotificationHelper.showJoinDeclinedNotification(
+                                    context,
+                                    "The leader has declined your joing request"
+                                )
+
+                                // Clean up the request node
+                                rideRepository.cancelJoinRequest(code, riderId)
+                            }
+                        }
+                    }
                 }.onFailure { error ->
-                    android.util.Log.e("RideSafeDebug", "[Service] joinRide repository call failed: ${error.message}", error)
-                    _uiState.update { it.copy(errorMessage = error.localizedMessage ?: "Failed to join ride.") }
+                    _uiState.update {
+                        it.copy(
+                            isJoiningRide = false,
+                            errorMessage = error.localizedMessage ?: "Failed to join ride."
+                        )
+                    }
                 }
             } catch (e: Exception) {
-                _uiState.update { it.copy(errorMessage = e.localizedMessage ?: "An unexpected error occurred.") }
-            } finally {
-                _uiState.update { it.copy(isJoiningRide = false) }
+                _uiState.update {
+                    it.copy(
+                        isJoiningRide = false,
+                        errorMessage = e.localizedMessage ?: "An unexpected error occurred."
+                    )
+                }
             }
         }
+    }
+
+    fun cancelJoinRequest() {
+        val code = _uiState.value.pendingJoinCode
+        val rId = pendingRiderId
+        joinTimeoutJob?.cancel()
+        joinRequestJob?.cancel()
+        if (code.isNotEmpty() && rId != null) {
+            rideRepository.cancelJoinRequest(code, rId)
+        }
+        _uiState.update {
+            it.copy(
+                isWaitingForApproval = false,
+                pendingJoinCode = "",
+                approvalTimeRemaining = 120
+            )
+        }
+    }
+
+    fun dismissDeclinedDialog() {
+        _uiState.update { it.copy(declinedDialogMessage = null) }
     }
 
     fun rejoinRide(

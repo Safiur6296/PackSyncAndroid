@@ -6,6 +6,8 @@ import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.database.ValueEventListener
+import com.ridesafe.app.data.model.JoinRequest
+import com.ridesafe.app.data.model.JoinRequestStatus
 import com.ridesafe.app.data.model.RideSession
 import com.ridesafe.app.data.model.Rider
 import com.ridesafe.app.data.model.RiderStatus
@@ -66,18 +68,82 @@ class RideRepository {
     }
 
     /**
-     * Generates a short, memorable 6-character ride code (e.g. "MOTO74" or "RIDE29").
+     * Checks if a ride code currently exists in Firebase Realtime Database.
+     */
+    suspend fun checkRideCodeExists(rideCode: String): Boolean {
+        val cleanCode = rideCode.trim().uppercase()
+        if (cleanCode.length != 6) return false
+        return try {
+            val snapshot = withTimeoutOrNull(3000L) {
+                suspendCancellableCoroutine { continuation ->
+                    val query = ridesRef.child(cleanCode)
+                    val listener = object : ValueEventListener {
+                        override fun onDataChange(snapshot: DataSnapshot) {
+                            if (continuation.isActive) {
+                                continuation.resume(snapshot)
+                            }
+                        }
+                        override fun onCancelled(error: DatabaseError) {
+                            if (continuation.isActive) {
+                                continuation.resume(null)
+                            }
+                        }
+                    }
+                    query.addListenerForSingleValueEvent(listener)
+                    continuation.invokeOnCancellation {
+                        query.removeEventListener(listener)
+                    }
+                }
+            }
+            snapshot != null && snapshot.exists()
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Generates a candidate 6-character ride code from memorable prefixes.
      */
     fun generateRideCode(): String {
-        val prefixes = listOf("MOTO", "RIDE", "BIKE", "CREW", "ROAD")
+        val prefixes = listOf(
+            "MOTO", "RIDE", "BIKE", "CREW", "ROAD", "PACK", "TRIP", "TOUR", "FAST", "WIND",
+            "GEAR", "APEX", "WHLZ", "CRUZ", "PEAK", "WILD", "ECHO", "BOLT", "DRIF", "RACE",
+            "BEAM", "FLOW", "TREK", "HAWK", "RAID", "FURY", "DASH", "SURG", "NEON", "ROAR",
+            "CLAN", "ZONE", "GRID", "RUSH", "NOVA", "STAR", "PACE", "BLZE", "STRM", "SHFT",
+            "TRBO", "TRCK", "SPED", "TRAL", "PULS", "SPRK", "VRTX", "VIBE", "ROAM", "ACE1"
+        )
         val prefix = prefixes.random()
         val number = (10..99).random()
         return "$prefix$number"
     }
 
     /**
+     * Generates a short, memorable 6-character ride code that is GUARANTEED not to exist in DB.
+     * Prevents reusing codes from existing or past rides (Fix 1).
+     */
+    suspend fun generateUniqueRideCode(): String {
+        for (attempt in 1..25) {
+            val candidate = generateRideCode()
+            if (!checkRideCodeExists(candidate)) {
+                return candidate
+            }
+        }
+        // Fallback: 4 random uppercase letters + 2 digits if prefixes collide
+        val chars = "ABCDEFGHJKLMNPQRSTUVWXYZ"
+        for (attempt in 1..15) {
+            val randomPrefix = (1..4).map { chars.random() }.joinToString("")
+            val num = (10..99).random()
+            val candidate = "$randomPrefix$num"
+            if (!checkRideCodeExists(candidate)) {
+                return candidate
+            }
+        }
+        return generateRideCode()
+    }
+
+    /**
      * Creates a new ride session in Firebase with the given rider as the initial creator,
-     * and optionally attaches the planned trip details (start/destination/route geometry).
+     * ensuring a fresh, unique code not present in DB (Fix 1).
      * Returns a Result containing Pair(rideCode, riderId).
      */
     suspend fun createRide(
@@ -86,7 +152,7 @@ class RideRepository {
     ): Result<Pair<String, String>> {
         return try {
             val riderId = getOrCreateRiderId()
-            val rideCode = generateRideCode()
+            val rideCode = generateUniqueRideCode()
 
             val session = RideSession(
                 code = rideCode,
@@ -102,20 +168,18 @@ class RideRepository {
                 lastUpdated = System.currentTimeMillis()
             )
 
-            // Write session metadata and the creator into Firebase.
-            // In Firebase RTDB, writes are cached locally and synchronized to the cloud.
+            // Ensure any stale data at this code is cleared
             val sessionRef = ridesRef.child(rideCode)
             sessionRef.keepSynced(true)
-            sessionRef.child("session").setValue(session)
-                .addOnSuccessListener { Log.d("RideSafeDebug", "[FirebaseWrite] createRide session write SUCCESS: code=$rideCode") }
-                .addOnFailureListener { e -> Log.e("RideSafeDebug", "[FirebaseWrite] createRide session write FAILED: ${e.message}", e) }
-            sessionRef.child("riders").child(riderId).setValue(initialRider)
-                .addOnSuccessListener { Log.d("RideSafeDebug", "[FirebaseWrite] createRide initialRider write SUCCESS: code=$rideCode, riderId=$riderId") }
-                .addOnFailureListener { e -> Log.e("RideSafeDebug", "[FirebaseWrite] createRide initialRider write FAILED: ${e.message}", e) }
+            sessionRef.removeValue().await()
+
+            // Write session metadata and the creator into Firebase.
+            sessionRef.child("session").setValue(session).await()
+            sessionRef.child("riders").child(riderId).setValue(initialRider).await()
+            Log.d("RideSafeDebug", "[FirebaseWrite] createRide SUCCESS: code=$rideCode, riderId=$riderId")
 
             // Write planned route (tripInfo) if provided
             if (tripInfo != null && tripInfo.isTripPlanned) {
-                // Ensure both schemas are populated
                 val poly = tripInfo.effectiveGeometry
                 tripInfo.routeGeometry = poly
                 tripInfo.encodedPolyline = poly
@@ -127,15 +191,40 @@ class RideRepository {
                 }
                 tripInfo.hasPlannedTrip = true
 
-                sessionRef.child("tripInfo").setValue(tripInfo)
-                    .addOnSuccessListener { Log.d("RideSafeDebug", "[FirebaseWrite] createRide tripInfo write SUCCESS: code=$rideCode, start=${tripInfo.startName}, dest=${tripInfo.destName}") }
-                    .addOnFailureListener { e -> Log.e("RideSafeDebug", "[FirebaseWrite] createRide tripInfo write FAILED: ${e.message}", e) }
+                sessionRef.child("tripInfo").setValue(tripInfo).await()
+                Log.d("RideSafeDebug", "[FirebaseWrite] createRide tripInfo SUCCESS: code=$rideCode")
             }
 
             Result.success(Pair(rideCode, riderId))
         } catch (e: Exception) {
+            Log.e("RideSafeDebug", "createRide failed: ${e.message}", e)
             Result.failure(e)
         }
+    }
+
+    /**
+     * Observes the ride session metadata in real-time (code, createdBy, active status).
+     */
+    fun observeSession(rideCode: String): Flow<RideSession?> = callbackFlow {
+        val cleanCode = rideCode.trim().uppercase()
+        val sessionRef = ridesRef.child(cleanCode).child("session")
+        sessionRef.keepSynced(true)
+
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                val session = if (snapshot.exists()) {
+                    snapshot.getValue(RideSession::class.java)
+                } else null
+                trySend(session)
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                close(error.toException())
+            }
+        }
+
+        sessionRef.addValueEventListener(listener)
+        awaitClose { sessionRef.removeEventListener(listener) }
     }
 
     /**
@@ -348,6 +437,155 @@ class RideRepository {
             Result.success(riderId)
         } catch (e: Exception) {
             Log.e("RideRepository", "joinRide failed", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Creates a pending join request in Firebase for leader/rider approval (Fix 2).
+     * Returns Result containing the joiner's riderId.
+     */
+    suspend fun requestToJoinRide(rideCode: String, riderName: String): Result<String> {
+        return try {
+            val cleanCode = rideCode.trim().uppercase()
+            val riderId = getOrCreateRiderId()
+
+            // Verify ride exists and is active
+            if (!isRideActive(cleanCode)) {
+                return Result.failure(
+                    IllegalArgumentException("Ride '$cleanCode' not found or inactive. Check the code and try again.")
+                )
+            }
+
+            ridesRef.child(cleanCode).keepSynced(true)
+            val request = JoinRequest(
+                id = riderId,
+                rideCode = cleanCode,
+                riderId = riderId,
+                riderName = riderName.trim().ifEmpty { "Rider" },
+                timestamp = System.currentTimeMillis(),
+                status = JoinRequestStatus.PENDING.name
+            )
+
+            // Write join request to rides/{cleanCode}/joinRequests/{riderId}
+            ridesRef.child(cleanCode).child("joinRequests").child(riderId).setValue(request).await()
+            Log.d("RideSafeDebug", "requestToJoinRide created: ride=$cleanCode, riderId=$riderId")
+
+            Result.success(riderId)
+        } catch (e: Exception) {
+            Log.e("RideRepository", "requestToJoinRide failed: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Observes the status of a specific rider's join request in real-time.
+     */
+    fun observeJoinRequest(rideCode: String, riderId: String): Flow<JoinRequest?> = callbackFlow {
+        val cleanCode = rideCode.trim().uppercase()
+        val requestRef = ridesRef.child(cleanCode).child("joinRequests").child(riderId)
+        requestRef.keepSynced(true)
+
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                val request = if (snapshot.exists()) {
+                    snapshot.getValue(JoinRequest::class.java)
+                } else null
+                trySend(request)
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                close(error.toException())
+            }
+        }
+
+        requestRef.addValueEventListener(listener)
+        awaitClose { requestRef.removeEventListener(listener) }
+    }
+
+    /**
+     * Observes all active pending join requests for a ride session in real-time (Fix 2).
+     * Used by the creator / present riders to receive incoming join requests.
+     */
+    fun observeJoinRequests(rideCode: String): Flow<List<JoinRequest>> = callbackFlow {
+        val cleanCode = rideCode.trim().uppercase()
+        val requestsRef = ridesRef.child(cleanCode).child("joinRequests")
+        requestsRef.keepSynced(true)
+
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                val list = mutableListOf<JoinRequest>()
+                val now = System.currentTimeMillis()
+                for (child in snapshot.children) {
+                    val req = child.getValue(JoinRequest::class.java)
+                    // Keep requests that are pending and within 2 minutes (120 seconds)
+                    if (req != null && req.isPending && (now - req.timestamp <= 120_000L)) {
+                        list.add(req.copy(id = child.key ?: req.id))
+                    }
+                }
+                trySend(list)
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                close(error.toException())
+            }
+        }
+
+        requestsRef.addValueEventListener(listener)
+        awaitClose { requestsRef.removeEventListener(listener) }
+    }
+
+    /**
+     * Cancels an existing join request (e.g. When the user taps Cancel).
+     */
+    fun cancelJoinRequest(rideCode: String, riderId: String) {
+        try {
+            val cleanCode = rideCode.trim().uppercase()
+            ridesRef.child(cleanCode).child("joinRequests").child(riderId).removeValue()
+        } catch (e: Exception) {
+            Log.w("RideRepository", "cancelJoinRequest failed: ${e.message}")
+        }
+    }
+
+    /**
+     * Approves or declines a join request in Firebase (Fix 2).
+     */
+    fun respondToJoinRequest(
+        rideCode: String,
+        riderId: String,
+        approved: Boolean,
+        responderId: String = ""
+    ) {
+        val cleanCode = rideCode.trim().uppercase()
+        val status = if (approved) JoinRequestStatus.APPROVED.name else JoinRequestStatus.DECLINED.name
+        val updates = mapOf<String, Any>(
+            "status" to status,
+            "respondedBy" to responderId
+        )
+        ridesRef.child(cleanCode).child("joinRequests").child(riderId).updateChildren(updates)
+    }
+
+    /**
+     * Completes the join process once approved by creator/rider.
+     * Adds the rider to the active riders list and removes the join request.
+     */
+    suspend fun completeJoinRide(rideCode: String, riderId: String, riderName: String): Result<Unit> {
+        return try {
+            val cleanCode = rideCode.trim().uppercase()
+            val rider = Rider(
+                id = riderId,
+                name = riderName.trim(),
+                status = RiderStatus.RIDING.name,
+                lastUpdated = System.currentTimeMillis()
+            )
+            // Add to active convoy riders
+            ridesRef.child(cleanCode).child("riders").child(riderId).setValue(rider).await()
+            // Clean up request node
+            ridesRef.child(cleanCode).child("joinRequests").child(riderId).removeValue()
+            Log.d("RideSafeDebug", "completeJoinRide SUCCESS for $riderId in $cleanCode")
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e("RideRepository", "completeJoinRide failed: ${e.message}", e)
             Result.failure(e)
         }
     }
