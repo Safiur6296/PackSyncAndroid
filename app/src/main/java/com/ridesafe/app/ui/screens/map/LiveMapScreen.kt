@@ -5,33 +5,35 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.drawable.BitmapDrawable
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
+import android.os.SystemClock
 import android.widget.Toast
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -42,24 +44,22 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.AltRoute
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
-import androidx.compose.material.icons.filled.ArrowDownward
-import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.FitScreen
 import androidx.compose.material.icons.filled.Group
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.LocalCafe
+import androidx.compose.material.icons.filled.LocalGasStation
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MyLocation
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Radar
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.TwoWheeler
+import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -71,31 +71,32 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.google.android.gms.location.LocationServices
+import com.ridesafe.app.R
 import com.ridesafe.app.data.model.RiderStatus
 import com.ridesafe.app.data.model.TripInfo
 import com.ridesafe.app.ui.theme.BikerDarkBg
 import com.ridesafe.app.ui.theme.PackSyncTheme
-import com.ridesafe.app.ui.theme.RideSafeTheme
 import com.ridesafe.app.util.LocationUtils
 import com.ridesafe.app.util.PolylineUtils
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
@@ -104,54 +105,150 @@ import org.osmdroid.views.overlay.Marker as OsmMarker
 import org.osmdroid.views.overlay.Polyline as OsmPolyline
 
 /**
- * Creates a high-contrast directional puck for the current user ("YOU").
- * Designed for immediate glanceability through helmet visors:
- * - High-contrast concentric outer halo with live status color
- * - Solid high-contrast core
- * - Forward-pointing navigation heading chevron
- * - Live semantic status pip
- * - Glanceable "YOU" label
+ * Maps RiderStatus to its exact hexadecimal color integer.
  */
-private fun createCurrentUserMarkerBitmap(status: RiderStatus): Bitmap {
-    val diameter = 94f
-    val pointerHeight = 18f
-    val totalHeight = diameter + pointerHeight
-    val totalWidth = diameter
+private fun getStatusColorInt(status: RiderStatus): Int {
+    return when (status) {
+        RiderStatus.RIDING -> android.graphics.Color.parseColor("#00E676")     // Green
+        RiderStatus.REFUELING -> android.graphics.Color.parseColor("#FFB300")  // Amber
+        RiderStatus.PUNCTURE -> android.graphics.Color.parseColor("#FF7043")   // Orange
+        RiderStatus.REST -> android.graphics.Color.parseColor("#40C4FF")       // Blue
+        RiderStatus.OTHER -> android.graphics.Color.parseColor("#B0BEC5")      // Grey
+        RiderStatus.EMERGENCY -> android.graphics.Color.parseColor("#FF1744")  // Red
+    }
+}
 
-    val bitmap = Bitmap.createBitmap(totalWidth.toInt(), totalHeight.toInt(), Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(bitmap)
-
-    val centerX = totalWidth / 2f
-    val centerY = diameter / 2f
-
-    // 1. Soft live-status outer pulse ring
-    val outerGlowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.parseColor("#3330D158")
+/**
+ * Draws the vector status icon inside a circular badge on Android Canvas.
+ */
+private fun drawStatusIconOnCanvas(canvas: Canvas, cx: Float, cy: Float, status: RiderStatus, colorInt: Int) {
+    val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = colorInt
+        style = Paint.Style.STROKE
+        strokeWidth = 2f
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+    }
+    val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = colorInt
         style = Paint.Style.FILL
     }
-    canvas.drawCircle(centerX, centerY, 46f, outerGlowPaint)
 
-    // 2. High-contrast solid dark puck center
-    val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    when (status) {
+        RiderStatus.RIDING -> {
+            // Motorcycle: 2 wheels + frame + handlebar
+            canvas.drawCircle(cx - 4.2f, cy + 2.5f, 2.2f, strokePaint)
+            canvas.drawCircle(cx + 4.2f, cy + 2.5f, 2.2f, strokePaint)
+            canvas.drawLine(cx - 4.2f, cy + 2.5f, cx - 0.5f, cy - 1.5f, strokePaint)
+            canvas.drawLine(cx - 0.5f, cy - 1.5f, cx + 4.2f, cy + 2.5f, strokePaint)
+            canvas.drawLine(cx + 1.2f, cy - 3.8f, cx + 4f, cy - 3.8f, strokePaint)
+        }
+        RiderStatus.REFUELING -> {
+            // Gas pump: body rect + hose
+            canvas.drawRoundRect(RectF(cx - 4f, cy - 4.5f, cx + 1.5f, cy + 4.5f), 1.5f, 1.5f, strokePaint)
+            val hose = Path().apply {
+                moveTo(cx + 1.5f, cy - 2.5f)
+                lineTo(cx + 4.2f, cy - 2.5f)
+                lineTo(cx + 4.2f, cy + 2.5f)
+            }
+            canvas.drawPath(hose, strokePaint)
+        }
+        RiderStatus.PUNCTURE -> {
+            // Wrench: diagonal shaft + jaw
+            canvas.drawLine(cx - 3.5f, cy + 3.5f, cx + 1.8f, cy - 1.8f, strokePaint.apply { strokeWidth = 2.4f })
+            val jaw = Path().apply {
+                moveTo(cx + 0.8f, cy - 3.8f)
+                lineTo(cx + 3.8f, cy - 0.8f)
+                lineTo(cx + 4.5f, cy - 2.8f)
+                lineTo(cx + 2.8f, cy - 4.5f)
+                close()
+            }
+            canvas.drawPath(jaw, fillPaint)
+        }
+        RiderStatus.REST -> {
+            // Coffee cup: body + handle + steam
+            canvas.drawRoundRect(RectF(cx - 3.5f, cy - 1.8f, cx + 2.2f, cy + 4.2f), 1.5f, 1.5f, strokePaint)
+            val handle = Path().apply {
+                moveTo(cx + 2.2f, cy - 0.5f)
+                quadTo(cx + 4.5f, cy + 1f, cx + 2.2f, cy + 2.8f)
+            }
+            canvas.drawPath(handle, strokePaint)
+            canvas.drawLine(cx - 1.8f, cy - 4.2f, cx - 1.8f, cy - 2.8f, strokePaint)
+            canvas.drawLine(cx + 0.5f, cy - 4.2f, cx + 0.5f, cy - 2.8f, strokePaint)
+        }
+        RiderStatus.EMERGENCY -> {
+            // Exclamation shield
+            canvas.drawLine(cx, cy - 4.5f, cx, cy + 0.5f, strokePaint.apply { strokeWidth = 2.2f })
+            canvas.drawCircle(cx, cy + 3.2f, 1.3f, fillPaint)
+        }
+        RiderStatus.OTHER -> {
+            // Warning triangle
+            val triangle = Path().apply {
+                moveTo(cx, cy - 4.5f)
+                lineTo(cx + 4.5f, cy + 3.8f)
+                lineTo(cx - 4.5f, cy + 3.8f)
+                close()
+            }
+            canvas.drawPath(triangle, strokePaint)
+            canvas.drawCircle(cx, cy + 1.5f, 1.1f, fillPaint)
+        }
+    }
+}
+
+/**
+ * Creates the directional rotating puck for the current user:
+ * - Soft translucent heading cone pointing forward (angle 0° / UP)
+ * - Soft live pulse glow
+ * - Dark puck core with high-contrast border
+ * - Navigation chevron pointing UP (rotates smoothly to phone direction)
+ */
+private fun createCurrentUserArrowBitmap(): Bitmap {
+    val size = 120
+    val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+    val cx = size / 2f
+    val cy = size / 2f
+
+    // 1. Soft translucent heading cone pointing forward (centered around 270° / UP)
+    val conePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.parseColor("#3300E676")
+        style = Paint.Style.FILL
+    }
+    val conePath = Path().apply {
+        moveTo(cx, cy)
+        arcTo(RectF(cx - 52f, cy - 52f, cx + 52f, cy + 52f), 242f, 56f, false)
+        close()
+    }
+    canvas.drawPath(conePath, conePaint)
+
+    // 2. Soft live pulse glow
+    val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.parseColor("#2600E676")
+        style = Paint.Style.FILL
+    }
+    canvas.drawCircle(cx, cy, 32f, glowPaint)
+
+    // 3. High-contrast solid dark puck center
+    val puckPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = android.graphics.Color.parseColor("#141416")
         style = Paint.Style.FILL
     }
-    canvas.drawCircle(centerX, centerY, 34f, bgPaint)
+    canvas.drawCircle(cx, cy, 22f, puckPaint)
 
-    // 3. Crisp outer border
+    // 4. Crisp outer border
     val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = android.graphics.Color.parseColor("#FAFAFA")
         style = Paint.Style.STROKE
-        strokeWidth = 4f
+        strokeWidth = 3f
     }
-    canvas.drawCircle(centerX, centerY, 34f, strokePaint)
+    canvas.drawCircle(cx, cy, 22f, strokePaint)
 
-    // 4. Directional heading chevron (pointing upward in puck)
+    // 5. Directional heading chevron (pointing upward in puck)
     val chevronPath = Path().apply {
-        moveTo(centerX, centerY - 18f)
-        lineTo(centerX + 12f, centerY + 10f)
-        lineTo(centerX, centerY + 4f)
-        lineTo(centerX - 12f, centerY + 10f)
+        moveTo(cx, cy - 14f)
+        lineTo(cx + 9f, cy + 10f)
+        lineTo(cx, cy + 4f)
+        lineTo(cx - 9f, cy + 10f)
         close()
     }
     val chevronPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -160,35 +257,52 @@ private fun createCurrentUserMarkerBitmap(status: RiderStatus): Bitmap {
     }
     canvas.drawPath(chevronPath, chevronPaint)
 
-    // 5. Semantic status pip (Live green or status color)
-    val pipPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = when (status) {
-            RiderStatus.RIDING -> android.graphics.Color.parseColor("#30D158")
-            RiderStatus.EMERGENCY -> android.graphics.Color.parseColor("#FF453A")
-            else -> android.graphics.Color.parseColor("#FFB300")
-        }
+    return bitmap
+}
+
+/**
+ * Creates the UNROTATED status badge for the current user's marker.
+ * Sits at the top-right corner of the puck, stays readable at any zoom level,
+ * and does NOT rotate with the heading arrow.
+ */
+private fun createCurrentUserBadgeBitmap(status: RiderStatus): Bitmap {
+    val size = 120
+    val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+    val cx = size / 2f
+    val cy = size / 2f
+
+    // Top-right corner of the 22f puck
+    val bx = cx + 18f
+    val by = cy - 18f
+    val badgeRadius = 12f
+    val statusColorInt = getStatusColorInt(status)
+
+    // Solid dark circular backing for high contrast
+    val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.parseColor("#141416")
         style = Paint.Style.FILL
     }
-    canvas.drawCircle(centerX + 24f, centerY - 24f, 8f, pipPaint)
+    canvas.drawCircle(bx, by, badgeRadius, bgPaint)
 
-    val pipBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.parseColor("#141416")
+    // Status tinted border
+    val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = statusColorInt
         style = Paint.Style.STROKE
         strokeWidth = 2.5f
     }
-    canvas.drawCircle(centerX + 24f, centerY - 24f, 8f, pipBorderPaint)
+    canvas.drawCircle(bx, by, badgeRadius, borderPaint)
+
+    // Status icon drawn inside, tinted with status color
+    drawStatusIconOnCanvas(canvas, bx, by, status, statusColorInt)
 
     return bitmap
 }
 
 /**
- * Creates a map pin bitmap for fellow riders with their name and status.
+ * Creates a map pin bitmap for fellow riders with their name and top-right status badge.
  */
-private fun createRiderMarkerBitmap(name: String, status: RiderStatus, isCurrentUser: Boolean): Bitmap {
-    if (isCurrentUser) {
-        return createCurrentUserMarkerBitmap(status)
-    }
-
+private fun createRiderMarkerBitmap(name: String, status: RiderStatus): Bitmap {
     val displayName = name.trim().ifEmpty { "Rider" }
     val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textSize = 28f
@@ -197,20 +311,15 @@ private fun createRiderMarkerBitmap(name: String, status: RiderStatus, isCurrent
     }
 
     val textWidth = textPaint.measureText(displayName)
-    val horizontalPadding = 20f
-    val pillWidth = (textWidth + horizontalPadding * 2f).coerceAtLeast(110f)
+    val horizontalPadding = 24f
+    val pillWidth = (textWidth + horizontalPadding * 2f).coerceAtLeast(120f)
     val pillHeight = 56f
     val pointerHeight = 14f
     val totalHeight = pillHeight + pointerHeight
 
-    val bitmap = Bitmap.createBitmap(pillWidth.toInt(), totalHeight.toInt(), Bitmap.Config.ARGB_8888)
+    val bitmap = Bitmap.createBitmap(pillWidth.toInt() + 16, totalHeight.toInt(), Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
-
-    val accentColor = when (status) {
-        RiderStatus.RIDING -> android.graphics.Color.parseColor("#30D158")
-        RiderStatus.EMERGENCY -> android.graphics.Color.parseColor("#FF453A")
-        else -> android.graphics.Color.parseColor("#FFB300")
-    }
+    val accentColor = getStatusColorInt(status)
 
     // Pill background
     val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -222,15 +331,15 @@ private fun createRiderMarkerBitmap(name: String, status: RiderStatus, isCurrent
         style = Paint.Style.STROKE
         strokeWidth = 3f
     }
-    val rect = RectF(2f, 2f, pillWidth - 2f, pillHeight - 2f)
-    canvas.drawRoundRect(rect, 28f, 28f, bgPaint)
-    canvas.drawRoundRect(rect, 28f, 28f, strokePaint)
+    val rect = RectF(2f, 10f, pillWidth - 2f, pillHeight)
+    canvas.drawRoundRect(rect, 24f, 24f, bgPaint)
+    canvas.drawRoundRect(rect, 24f, 24f, strokePaint)
 
     // Inverted pointer
     val centerX = pillWidth / 2f
     val pointerPath = Path().apply {
-        moveTo(centerX - 10f, pillHeight - 2f)
-        lineTo(centerX + 10f, pillHeight - 2f)
+        moveTo(centerX - 10f, pillHeight - 1f)
+        lineTo(centerX + 10f, pillHeight - 1f)
         lineTo(centerX, totalHeight - 1f)
         close()
     }
@@ -241,9 +350,29 @@ private fun createRiderMarkerBitmap(name: String, status: RiderStatus, isCurrent
     canvas.drawPath(pointerPath, pointerPaint)
 
     // Name text
-    val textX = (pillWidth - textWidth) / 2f
-    val textBaseline = pillHeight / 2f - ((textPaint.descent() + textPaint.ascent()) / 2f)
+    val textX = (pillWidth - textWidth) / 2f - 4f
+    val textBaseline = 10f + (pillHeight - 10f) / 2f - ((textPaint.descent() + textPaint.ascent()) / 2f)
     canvas.drawText(displayName, textX, textBaseline, textPaint)
+
+    // Top-right circular status badge
+    val bx = pillWidth - 6f
+    val by = 12f
+    val badgeRadius = 12f
+
+    val badgeBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.parseColor("#141416")
+        style = Paint.Style.FILL
+    }
+    canvas.drawCircle(bx, by, badgeRadius, badgeBgPaint)
+
+    val badgeBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = accentColor
+        style = Paint.Style.STROKE
+        strokeWidth = 2.5f
+    }
+    canvas.drawCircle(bx, by, badgeRadius, badgeBorderPaint)
+
+    drawStatusIconOnCanvas(canvas, bx, by, status, accentColor)
 
     return bitmap
 }
@@ -390,20 +519,105 @@ fun LiveMapScreen(
 ) {
     val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsState()
+    val isDarkTheme = isSystemInDarkTheme()
 
     val markerBitmapCache = remember { mutableMapOf<String, Bitmap>() }
     val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
+    val sensorManager = remember { context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager }
 
     var mapView by remember { mutableStateOf<MapView?>(null) }
+    var currentUserArrowMarker by remember { mutableStateOf<OsmMarker?>(null) }
     var hasCenteredInitialLocation by remember { mutableStateOf(false) }
     var isRouteVisible by remember { mutableStateOf(true) }
     var showLeaveConfirmDialog by remember { mutableStateOf(false) }
+
+    // Compass and Heading State
+    var compassHeading by remember { mutableFloatStateOf(0f) }
+    var currentSmoothedHeading by remember { mutableFloatStateOf(0f) }
 
     LaunchedEffect(Unit) {
         Configuration.getInstance().apply {
             userAgentValue = context.packageName
             osmdroidBasePath = context.getDir("osmdroid", Context.MODE_PRIVATE)
             osmdroidTileCache = context.getDir("osmdroid_tiles", Context.MODE_PRIVATE)
+        }
+    }
+
+    // Adapt map basemap to system dark / light mode
+    LaunchedEffect(mapView, isDarkTheme) {
+        val mv = mapView ?: return@LaunchedEffect
+        if (isDarkTheme) {
+            val darkMatrix = ColorMatrix(floatArrayOf(
+                -0.85f, 0f, 0f, 0f, 235f,
+                0f, -0.85f, 0f, 0f, 235f,
+                0f, 0f, -0.85f, 0f, 235f,
+                0f, 0f, 0f, 1f, 0f
+            ))
+            mv.overlayManager.tilesOverlay.setColorFilter(ColorMatrixColorFilter(darkMatrix))
+        } else {
+            mv.overlayManager.tilesOverlay.setColorFilter(null)
+        }
+        mv.invalidate()
+    }
+
+    // Register rotation vector / compass sensor listener
+    DisposableEffect(sensorManager) {
+        val rotationSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
+            ?: sensorManager?.getDefaultSensor(Sensor.TYPE_ORIENTATION)
+
+        val listener = object : SensorEventListener {
+            private var lastTimestamp = 0L
+            override fun onSensorChanged(event: SensorEvent?) {
+                if (event == null) return
+                val now = SystemClock.uptimeMillis()
+                // Throttle sensor intake to ~20 fps (50ms)
+                if (now - lastTimestamp < 50L) return
+                lastTimestamp = now
+
+                if (event.sensor.type == Sensor.TYPE_ROTATION_VECTOR) {
+                    val rotationMatrix = FloatArray(9)
+                    SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values)
+                    val orientation = FloatArray(3)
+                    SensorManager.getOrientation(rotationMatrix, orientation)
+                    val degrees = (Math.toDegrees(orientation[0].toDouble()).toFloat() + 360f) % 360f
+                    compassHeading = degrees
+                } else if (event.sensor.type == Sensor.TYPE_ORIENTATION) {
+                    compassHeading = (event.values[0] + 360f) % 360f
+                }
+            }
+
+            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+        }
+
+        if (rotationSensor != null) {
+            sensorManager?.registerListener(listener, rotationSensor, SensorManager.SENSOR_DELAY_UI)
+        }
+
+        onDispose {
+            sensorManager?.unregisterListener(listener)
+        }
+    }
+
+    // Determine target heading: GPS bearing if speed > ~2 m/s, else device compass
+    val targetHeading = if (uiState.userSpeed > 2.0f && uiState.userBearing != null && uiState.userBearing!! >= 0f) {
+        uiState.userBearing!!
+    } else {
+        compassHeading
+    }
+
+    // Heading animation loop: 10-15 fps maximum (~66ms frame time), low-pass filter along shortest angular path
+    LaunchedEffect(Unit) {
+        while (isActive) {
+            var diff = (targetHeading - currentSmoothedHeading) % 360f
+            if (diff > 180f) diff -= 360f
+            if (diff < -180f) diff += 360f
+
+            if (kotlin.math.abs(diff) > 0.25f) {
+                currentSmoothedHeading = (currentSmoothedHeading + diff * 0.25f + 360f) % 360f
+                currentUserArrowMarker?.rotation = currentSmoothedHeading
+                mapView?.invalidate()
+            }
+            delay(66L) // ~15 fps limit to prevent battery drain and jitter
         }
     }
 
@@ -472,6 +686,15 @@ fun LiveMapScreen(
                     )
                     controller.setZoom(14.0)
                     controller.setCenter(GeoPoint(28.6139, 77.2090))
+                    if (isDarkTheme) {
+                        val darkMatrix = ColorMatrix(floatArrayOf(
+                            -0.85f, 0f, 0f, 0f, 235f,
+                            0f, -0.85f, 0f, 0f, 235f,
+                            0f, 0f, -0.85f, 0f, 235f,
+                            0f, 0f, 0f, 1f, 0f
+                        ))
+                        overlayManager.tilesOverlay.setColorFilter(ColorMatrixColorFilter(darkMatrix))
+                    }
                     onResume()
                     mapView = this
                 }
@@ -494,7 +717,7 @@ fun LiveMapScreen(
                     mv.overlays.add(routePolyline)
                 }
 
-                // Add Start point marker (restrained, no overlap with rider)
+                // Add Start point marker
                 if (tripInfo != null && tripInfo.isTripPlanned && isRouteVisible && tripInfo.startLat != 0.0 && tripInfo.startLng != 0.0) {
                     val startPos = GeoPoint(tripInfo.startLat, tripInfo.startLng)
                     val startKey = "start_${tripInfo.startName}"
@@ -526,30 +749,71 @@ fun LiveMapScreen(
                     mv.overlays.add(destMarker)
                 }
 
-                // Add Rider Markers
+                // Add Rider Markers with status badges and heading rotation
                 riders.forEach { riderItem ->
                     val rider = riderItem.rider
                     if (rider.lat != 0.0 && rider.lng != 0.0) {
                         val position = GeoPoint(rider.lat, rider.lng)
-                        val status = rider.riderStatus
-                        val cacheKey = "${rider.id}_${rider.name}_${status.name}_${riderItem.isCurrentUser}"
-                        val markerBitmap = markerBitmapCache.getOrPut(cacheKey) {
-                            createRiderMarkerBitmap(rider.name, status, riderItem.isCurrentUser)
-                        }
+                        val status = if (riderItem.isCurrentUser) uiState.myStatus else rider.riderStatus
 
-                        val marker = OsmMarker(mv).apply {
-                            this.position = position
-                            this.title = if (riderItem.isCurrentUser) "${rider.name} (You)" else rider.name
-                            this.snippet = "Status: ${status.displayName} • ${riderItem.formattedDistance}"
-                            this.icon = BitmapDrawable(mv.context.resources, markerBitmap)
-                            setAnchor(OsmMarker.ANCHOR_CENTER, OsmMarker.ANCHOR_BOTTOM)
-                            setOnMarkerClickListener { clickedMarker, _ ->
-                                viewModel.selectRider(riderItem)
-                                clickedMarker.showInfoWindow()
-                                true
+                        if (riderItem.isCurrentUser) {
+                            // Current user: Directional rotating arrow puck + UNROTATED top-right status badge
+                            val arrowBitmap = markerBitmapCache.getOrPut("user_arrow") {
+                                createCurrentUserArrowBitmap()
                             }
+                            val badgeKey = "user_badge_${status.name}"
+                            val badgeBitmap = markerBitmapCache.getOrPut(badgeKey) {
+                                createCurrentUserBadgeBitmap(status)
+                            }
+
+                            val arrowMarker = OsmMarker(mv).apply {
+                                this.position = position
+                                this.title = "${rider.name} (You)"
+                                this.snippet = "Status: ${status.displayName}"
+                                this.icon = BitmapDrawable(mv.context.resources, arrowBitmap)
+                                this.setAnchor(OsmMarker.ANCHOR_CENTER, OsmMarker.ANCHOR_CENTER)
+                                this.rotation = currentSmoothedHeading
+                                setOnMarkerClickListener { _, _ ->
+                                    viewModel.selectRider(riderItem)
+                                    false
+                                }
+                            }
+                            currentUserArrowMarker = arrowMarker
+                            mv.overlays.add(arrowMarker)
+
+                            val badgeMarker = OsmMarker(mv).apply {
+                                this.position = position
+                                this.title = "Status: ${status.displayName}"
+                                this.icon = BitmapDrawable(mv.context.resources, badgeBitmap)
+                                this.setAnchor(OsmMarker.ANCHOR_CENTER, OsmMarker.ANCHOR_CENTER)
+                                this.rotation = 0f
+                                setOnMarkerClickListener { _, _ ->
+                                    viewModel.selectRider(riderItem)
+                                    false
+                                }
+                            }
+                            mv.overlays.add(badgeMarker)
+                        } else {
+                            // Fellow rider: Pin with status badge on top-right corner
+                            val cacheKey = "rider_${rider.id}_${rider.name}_${status.name}"
+                            val markerBitmap = markerBitmapCache.getOrPut(cacheKey) {
+                                createRiderMarkerBitmap(rider.name, status)
+                            }
+
+                            val marker = OsmMarker(mv).apply {
+                                this.position = position
+                                this.title = rider.name
+                                this.snippet = "Status: ${status.displayName} • ${riderItem.formattedDistance}"
+                                this.icon = BitmapDrawable(mv.context.resources, markerBitmap)
+                                this.setAnchor(OsmMarker.ANCHOR_CENTER, OsmMarker.ANCHOR_BOTTOM)
+                                setOnMarkerClickListener { clickedMarker, _ ->
+                                    viewModel.selectRider(riderItem)
+                                    clickedMarker.showInfoWindow()
+                                    true
+                                }
+                            }
+                            mv.overlays.add(marker)
                         }
-                        mv.overlays.add(marker)
                     }
                 }
 
@@ -557,93 +821,98 @@ fun LiveMapScreen(
             }
         )
 
-        // 2. Consolidated Top HUD Bar (Replaces the 3 stacked cards with 1 slim area)
-        ConsolidatedTopHud(
+        // 2. Redesigned Clean Header Row (Logo + Code + Riders + Menu)
+        PackSyncHeader(
             rideCode = uiState.rideCode,
             riderCount = uiState.riders.size,
-            tripInfo = uiState.tripInfo,
-            emergencyRiders = uiState.riders.filter { !it.isCurrentUser && it.rider.riderStatus == RiderStatus.EMERGENCY },
             onCopyCode = {
                 val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                 val clip = ClipData.newPlainText("PackSync Code", uiState.rideCode)
                 clipboard.setPrimaryClip(clip)
                 Toast.makeText(context, "Ride code copied: ${uiState.rideCode}", Toast.LENGTH_SHORT).show()
             },
-            onFitRoute = {
-                isRouteVisible = true
-                zoomToFitContent(mapView, uiState.riders, uiState.routePoints, uiState.tripInfo)
-            },
             onLeaveClick = { showLeaveConfirmDialog = true },
-            onLocateEmergencyRider = { emRider ->
-                val lat = emRider.rider.lat
-                val lng = emRider.rider.lng
-                if (lat != 0.0 && lng != 0.0) {
-                    mapView?.controller?.animateTo(GeoPoint(lat, lng), 17.0, 1000L)
-                }
-            },
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .statusBarsPadding()
-                .padding(horizontal = 16.dp, vertical = 10.dp)
+                .padding(horizontal = 16.dp, vertical = 12.dp)
         )
 
-        // 3. Compact Collapsed / Expandable Rider Radar (44dp pill by default)
-        RiderRadarPanel(
-            riders = uiState.riders,
-            onRiderClick = { riderItem ->
-                val lat = riderItem.rider.lat
-                val lng = riderItem.rider.lng
-                if (lat != 0.0 && lng != 0.0) {
-                    mapView?.controller?.animateTo(GeoPoint(lat, lng), 16.0, 1000L)
-                }
-            },
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
-                .padding(start = 16.dp, end = 16.dp, bottom = 86.dp)
-        )
-
-        // 4. Ergonomic Bottom Thumb Dock (MY STATUS Hero + 3 Circular Action Buttons)
-        BottomControlDock(
-            myStatus = uiState.myStatus,
-            isRouteVisible = isRouteVisible,
-            hasPlannedRoute = tripInfo != null && tripInfo.isTripPlanned,
-            onStatusClick = { viewModel.openStatusPicker() },
-            onRiderListClick = { viewModel.openRiderList() },
-            onToggleRouteClick = {
-                if (tripInfo != null && tripInfo.isTripPlanned) {
-                    isRouteVisible = !isRouteVisible
-                    if (isRouteVisible) {
-                        zoomToFitContent(mapView, uiState.riders, uiState.routePoints, tripInfo)
+        // Companion Emergency Alert Banner if any fellow rider triggers SOS
+        val emergencyRider = uiState.riders.firstOrNull { !it.isCurrentUser && it.rider.riderStatus == RiderStatus.EMERGENCY }
+        if (emergencyRider != null) {
+            EmergencyAlertBanner(
+                emergencyRider = emergencyRider,
+                onLocate = {
+                    val lat = emergencyRider.rider.lat
+                    val lng = emergencyRider.rider.lng
+                    if (lat != 0.0 && lng != 0.0) {
+                        mapView?.controller?.animateTo(GeoPoint(lat, lng), 17.0, 1000L)
                     }
-                } else {
-                    Toast.makeText(context, "No route planned for this convoy", Toast.LENGTH_SHORT).show()
-                }
-            },
-            onRecenterClick = {
-                val lat = currentRider?.rider?.lat ?: 0.0
-                val lng = currentRider?.rider?.lng ?: 0.0
-                if (lat != 0.0 && lng != 0.0) {
-                    mapView?.controller?.animateTo(GeoPoint(lat, lng), 16.0, 1000L)
-                } else {
-                    try {
-                        fusedLocationClient.lastLocation.addOnSuccessListener { loc ->
-                            if (loc != null) {
-                                mapView?.controller?.animateTo(
-                                    GeoPoint(loc.latitude, loc.longitude), 16.0, 1000L
-                                )
-                            }
-                        }
-                    } catch (_: SecurityException) {}
-                }
-            },
+                },
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .padding(top = 72.dp)
+                    .padding(horizontal = 16.dp)
+            )
+        }
+
+        // 3. Ergonomic Bottom Thumb Area (Trip Container + Bottom Control Dock)
+        Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
-                .padding(horizontal = 16.dp, vertical = 14.dp)
-        )
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Repositioned Trip Container (directly above bottom bar)
+            TripContainerCard(
+                tripInfo = tripInfo,
+                onFitRoute = {
+                    isRouteVisible = true
+                    zoomToFitContent(mapView, uiState.riders, uiState.routePoints, uiState.tripInfo)
+                }
+            )
 
-        // 5. Redesigned Update Ride Status Bottom Sheet
+            // Bottom Control Dock (My Status + 3 Circular Action Buttons)
+            BottomControlDock(
+                myStatus = uiState.myStatus,
+                isRouteVisible = isRouteVisible,
+                hasPlannedRoute = tripInfo != null && tripInfo.isTripPlanned,
+                onStatusClick = { viewModel.openStatusPicker() },
+                onRiderListClick = { viewModel.openRiderList() },
+                onToggleRouteClick = {
+                    if (tripInfo != null && tripInfo.isTripPlanned) {
+                        isRouteVisible = !isRouteVisible
+                        if (isRouteVisible) {
+                            zoomToFitContent(mapView, uiState.riders, uiState.routePoints, tripInfo)
+                        }
+                    } else {
+                        Toast.makeText(context, "No route planned for this convoy", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                onRecenterClick = {
+                    val lat = currentRider?.rider?.lat ?: 0.0
+                    val lng = currentRider?.rider?.lng ?: 0.0
+                    if (lat != 0.0 && lng != 0.0) {
+                        mapView?.controller?.animateTo(GeoPoint(lat, lng), 16.0, 1000L)
+                    } else {
+                        try {
+                            fusedLocationClient.lastLocation.addOnSuccessListener { loc ->
+                                if (loc != null) {
+                                    mapView?.controller?.animateTo(
+                                        GeoPoint(loc.latitude, loc.longitude), 16.0, 1000L
+                                    )
+                                }
+                            }
+                        } catch (_: SecurityException) {}
+                    }
+                }
+            )
+        }
+
+        // 4. Update Ride Status Bottom Sheet
         if (uiState.isStatusPickerOpen) {
             StopStatusDialog(
                 currentStatus = uiState.myStatus,
@@ -654,7 +923,7 @@ fun LiveMapScreen(
             )
         }
 
-        // 6. Rider List Roster Sheet
+        // 5. Rider List Roster Sheet
         if (uiState.isRiderListOpen) {
             RiderListBottomSheet(
                 riders = uiState.riders,
@@ -670,7 +939,7 @@ fun LiveMapScreen(
             )
         }
 
-        // 7. Accidental-Tap Prevention: Leave Convoy Confirmation Dialog
+        // 6. Leave Convoy Confirmation Dialog
         if (showLeaveConfirmDialog) {
             AlertDialog(
                 onDismissRequest = { showLeaveConfirmDialog = false },
@@ -720,210 +989,359 @@ fun LiveMapScreen(
 }
 
 /**
- * Consolidated Top HUD:
- * - Upper auxiliary strip: Ride code (with tap-to-copy), live rider count, overflow menu (hold-to-leave)
- * - Single Primary Navigation Bar: Destination name, remaining distance & duration, and Fit Route button
- * - Integrated emergency alert bar when companion rider needs assistance
+ * Clean Single Aligned Header Row:
+ * [small PackSync logo mark] [Code pill: small "CODE" label + monospaced code + copy icon] [Riders pill: icon + count] [Menu button]
+ * - All elements: 48dp height, 14dp corner radius, same surface fill and border, 12dp gaps, 16dp margins.
+ * - Code pill takes flexible space and never wraps.
  */
 @Composable
-private fun ConsolidatedTopHud(
+private fun PackSyncHeader(
     rideCode: String,
     riderCount: Int,
-    tripInfo: TripInfo?,
-    emergencyRiders: List<RiderWithDistance>,
     onCopyCode: () -> Unit,
-    onFitRoute: () -> Unit,
     onLeaveClick: () -> Unit,
-    onLocateEmergencyRider: (RiderWithDistance) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var isMenuOpen by remember { mutableStateOf(false) }
 
-    Column(
+    Row(
         modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        // Upper Auxiliary Meta Strip
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+        // 1. Small PackSync logo mark (48dp x 48dp)
+        Surface(
+            modifier = Modifier.size(48.dp),
+            shape = RoundedCornerShape(14.dp),
+            color = PackSyncTheme.colors.surface,
+            border = BorderStroke(1.dp, PackSyncTheme.colors.border)
         ) {
-            // Brand Title / Lead Arrow
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text(
-                    text = "PackSync",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = 1.2.sp,
-                    color = PackSyncTheme.colors.textSecondary
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    painter = painterResource(id = R.drawable.ic_packsync_mark),
+                    contentDescription = "PackSync",
+                    tint = PackSyncTheme.colors.textPrimary,
+                    modifier = Modifier.size(24.dp)
                 )
             }
-
-            // Right-aligned capsules: Ride Code + Rider Count + Overflow
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                // Monospaced Ride Code Capsule
-                Surface(
-                    shape = RoundedCornerShape(999.dp),
-                    color = PackSyncTheme.colors.surface,
-                    border = BorderStroke(1.5.dp, PackSyncTheme.colors.border),
-                    modifier = Modifier.clickable(onClick = onCopyCode)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Text(
-                            text = "CODE:",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = PackSyncTheme.colors.textTertiary
-                        )
-                        Text(
-                            text = rideCode.ifEmpty { "BIKE44" },
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Black,
-                            fontFamily = FontFamily.Monospace,
-                            color = PackSyncTheme.colors.textPrimary
-                        )
-                        Icon(
-                            imageVector = Icons.Default.ContentCopy,
-                            contentDescription = "Copy",
-                            tint = PackSyncTheme.colors.textSecondary,
-                            modifier = Modifier.size(13.dp)
-                        )
-                    }
-                }
-
-                // Rider Count Pill
-                Surface(
-                    shape = RoundedCornerShape(999.dp),
-                    color = PackSyncTheme.colors.surface,
-                    border = BorderStroke(1.5.dp, PackSyncTheme.colors.border)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Group,
-                            contentDescription = "Convoy",
-                            tint = PackSyncTheme.colors.textSecondary,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Text(
-                            text = "$riderCount",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = PackSyncTheme.colors.textPrimary
-                        )
-                    }
-                }
-
-                // Overflow Menu Button (Holding Leave Option)
-                Box {
-                    IconButton(
-                        onClick = { isMenuOpen = true },
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(PackSyncTheme.colors.surface)
-                            .border(1.5.dp, PackSyncTheme.colors.border, CircleShape)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.MoreVert,
-                            contentDescription = "Options",
-                            tint = PackSyncTheme.colors.textPrimary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-
-                    DropdownMenu(
-                        expanded = isMenuOpen,
-                        onDismissRequest = { isMenuOpen = false }
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("Leave Convoy", color = PackSyncTheme.colors.destructiveRed, fontWeight = FontWeight.Bold) },
-                            leadingIcon = {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.ExitToApp,
-                                    contentDescription = null,
-                                    tint = PackSyncTheme.colors.destructiveRed
-                                )
-                            },
-                            onClick = {
-                                isMenuOpen = false
-                                onLeaveClick()
-                            }
-                        )
-                    }
-                }
-            }
         }
 
-        // Primary Navigation Card (Destination + Metrics + Fit Route Action)
-        val destinationName = tripInfo?.destName?.trim()?.ifEmpty { "Malda Convoy Destination" } ?: "Malda Convoy Destination"
-        val distanceDurationText = if (tripInfo != null && tripInfo.formattedDistance.isNotBlank()) {
-            if (tripInfo.formattedDuration.isNotBlank()) {
-                "${tripInfo.formattedDistance} • ${tripInfo.formattedDuration}"
-            } else {
-                tripInfo.formattedDistance
-            }
-        } else {
-            "321 km • 4 hr 15 min"
-        }
-
+        // 2. Code pill: flexible space, never wraps, small "CODE" label + monospaced code + copy icon
         Surface(
-            shape = RoundedCornerShape(20.dp),
+            modifier = Modifier
+                .weight(1f)
+                .height(48.dp)
+                .clickable(onClick = onCopyCode),
+            shape = RoundedCornerShape(14.dp),
             color = PackSyncTheme.colors.surface,
-            border = BorderStroke(1.5.dp, PackSyncTheme.colors.border),
-            shadowElevation = 8.dp,
-            modifier = Modifier.fillMaxWidth()
+            border = BorderStroke(1.dp, PackSyncTheme.colors.border)
         ) {
             Row(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                    .fillMaxSize()
+                    .padding(horizontal = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.weight(1f, fill = false)
+                ) {
                     Text(
-                        text = destinationName,
-                        fontSize = 13.sp,
+                        text = "CODE",
+                        fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
-                        color = PackSyncTheme.colors.textSecondary,
+                        color = PackSyncTheme.colors.textTertiary,
+                        maxLines = 1
+                    )
+                    Text(
+                        text = rideCode.ifEmpty { "BIKE44" },
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Black,
+                        fontFamily = FontFamily.Monospace,
+                        color = PackSyncTheme.colors.textPrimary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Spacer(modifier = Modifier.height(2.dp))
+                }
+                Icon(
+                    imageVector = Icons.Default.ContentCopy,
+                    contentDescription = "Copy Code",
+                    tint = PackSyncTheme.colors.textSecondary,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+        }
+
+        // 3. Riders pill: icon + count (48dp height, minWidth 48dp)
+        Surface(
+            modifier = Modifier
+                .height(48.dp)
+                .defaultMinSize(minWidth = 48.dp),
+            shape = RoundedCornerShape(14.dp),
+            color = PackSyncTheme.colors.surface,
+            border = BorderStroke(1.dp, PackSyncTheme.colors.border)
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Group,
+                    contentDescription = "Riders",
+                    tint = PackSyncTheme.colors.textSecondary,
+                    modifier = Modifier.size(18.dp)
+                )
+                Text(
+                    text = "$riderCount",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = PackSyncTheme.colors.textPrimary
+                )
+            }
+        }
+
+        // 4. Menu button (48dp x 48dp)
+        Box {
+            Surface(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clickable { isMenuOpen = true },
+                shape = RoundedCornerShape(14.dp),
+                color = PackSyncTheme.colors.surface,
+                border = BorderStroke(1.dp, PackSyncTheme.colors.border)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Default.MoreVert,
+                        contentDescription = "Menu",
+                        tint = PackSyncTheme.colors.textPrimary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
+            DropdownMenu(
+                expanded = isMenuOpen,
+                onDismissRequest = { isMenuOpen = false }
+            ) {
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            text = "Leave Convoy",
+                            color = PackSyncTheme.colors.destructiveRed,
+                            fontWeight = FontWeight.Bold
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ExitToApp,
+                            contentDescription = null,
+                            tint = PackSyncTheme.colors.destructiveRed
+                        )
+                    },
+                    onClick = {
+                        isMenuOpen = false
+                        onLeaveClick()
+                    }
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Emergency Alert Banner shown directly under header when a companion rider triggers SOS.
+ */
+@Composable
+private fun EmergencyAlertBanner(
+    emergencyRider: com.ridesafe.app.ui.screens.map.RiderWithDistance,
+    onLocate: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = PackSyncTheme.colors.destructiveRed.copy(alpha = 0.16f),
+        border = BorderStroke(1.5.dp, PackSyncTheme.colors.destructiveRed),
+        modifier = modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(text = "🚨", fontSize = 16.sp)
+                Column {
                     Text(
-                        text = distanceDurationText,
-                        fontSize = 20.sp,
+                        text = "EMERGENCY: ${emergencyRider.rider.name}",
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.Black,
+                        color = PackSyncTheme.colors.destructiveRed
+                    )
+                    Text(
+                        text = "${emergencyRider.formattedDistance} away",
+                        fontSize = 10.sp,
                         color = PackSyncTheme.colors.textPrimary
                     )
                 }
+            }
+
+            Button(
+                onClick = onLocate,
+                colors = ButtonDefaults.buttonColors(containerColor = PackSyncTheme.colors.destructiveRed),
+                shape = RoundedCornerShape(8.dp),
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+            ) {
+                Text("LOCATE", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+            }
+        }
+    }
+}
+
+/**
+ * Redesigned Trip Container placed directly above the bottom control dock:
+ * - Top line: small "DESTINATION" label, destination name on one line with ellipsis
+ * - Below: two equal stat columns ("DISTANCE 321 km", "TIME 4 h 15 min") with thin vertical divider
+ * - Right: "Fit Route" button (48dp height, icon + label)
+ */
+@Composable
+private fun TripContainerCard(
+    tripInfo: TripInfo?,
+    onFitRoute: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    if (tripInfo == null || (!tripInfo.isTripPlanned && tripInfo.destName.isBlank())) return
+
+    val destinationName = tripInfo.destName.trim().ifEmpty { "Malda" }
+    val distanceText = if (tripInfo.formattedDistance.isNotBlank()) tripInfo.formattedDistance else "321 km"
+
+    // Format duration into standard "4 h 15 min" notation
+    val rawDuration = if (tripInfo.formattedDuration.isNotBlank()) tripInfo.formattedDuration else "4 h 15 min"
+    val durationText = rawDuration
+        .replace("hr", "h")
+        .replace("hrs", "h")
+        .replace("hours", "h")
+        .replace("hour", "h")
+        .replace("mins", "min")
+        .replace("minutes", "min")
+        .replace("minute", "min")
+
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = PackSyncTheme.colors.surface,
+        border = BorderStroke(1.dp, PackSyncTheme.colors.border),
+        shadowElevation = 4.dp,
+        modifier = modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            // Top line: small "DESTINATION" label, then destination name on one line with ellipsis
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    text = "DESTINATION",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.8.sp,
+                    color = PackSyncTheme.colors.textTertiary,
+                    maxLines = 1
+                )
+                Text(
+                    text = destinationName,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = PackSyncTheme.colors.textPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            // Below: two equal stat columns + right side "Fit Route" button
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Stat 1: DISTANCE
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "DISTANCE",
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.5.sp,
+                        color = PackSyncTheme.colors.textTertiary,
+                        maxLines = 1
+                    )
+                    Text(
+                        text = distanceText,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Black,
+                        fontFamily = FontFamily.Default,
+                        color = PackSyncTheme.colors.textPrimary,
+                        maxLines = 1
+                    )
+                }
+
+                // Thin vertical divider between stat columns
+                Box(
+                    modifier = Modifier
+                        .width(1.dp)
+                        .height(30.dp)
+                        .background(PackSyncTheme.colors.border)
+                )
 
                 Spacer(modifier = Modifier.width(12.dp))
 
-                // Tactile Fit Route Button
+                // Stat 2: TIME (formatted as "4 h 15 min")
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "TIME",
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.5.sp,
+                        color = PackSyncTheme.colors.textTertiary,
+                        maxLines = 1
+                    )
+                    Text(
+                        text = durationText,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Black,
+                        fontFamily = FontFamily.Default,
+                        color = PackSyncTheme.colors.textPrimary,
+                        maxLines = 1
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(10.dp))
+
+                // Right side: "Fit Route" button (48dp height)
                 Surface(
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(14.dp),
                     color = PackSyncTheme.colors.surfaceRaised,
                     border = BorderStroke(1.dp, PackSyncTheme.colors.border),
-                    modifier = Modifier.clickable(onClick = onFitRoute)
+                    modifier = Modifier
+                        .height(48.dp)
+                        .clickable(onClick = onFitRoute)
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .padding(horizontal = 14.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
@@ -931,270 +1349,15 @@ private fun ConsolidatedTopHud(
                             imageVector = Icons.Default.FitScreen,
                             contentDescription = "Fit Route",
                             tint = PackSyncTheme.colors.textPrimary,
-                            modifier = Modifier.size(16.dp)
+                            modifier = Modifier.size(18.dp)
                         )
                         Text(
-                            text = "FIT ROUTE",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Black,
-                            letterSpacing = 0.5.sp,
-                            color = PackSyncTheme.colors.textPrimary
-                        )
-                    }
-                }
-            }
-        }
-
-        // Inline Emergency Alert Pill if any companion rider needs help
-        val primaryEmergency = emergencyRiders.firstOrNull()
-        if (primaryEmergency != null) {
-            Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = PackSyncTheme.colors.destructiveRed.copy(alpha = 0.16f),
-                border = BorderStroke(1.5.dp, PackSyncTheme.colors.destructiveRed),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text(text = "🚨", fontSize = 16.sp)
-                        Column {
-                            Text(
-                                text = "EMERGENCY: ${primaryEmergency.rider.name}",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Black,
-                                color = PackSyncTheme.colors.destructiveRed
-                            )
-                            Text(
-                                text = "${primaryEmergency.formattedDistance} away",
-                                fontSize = 10.sp,
-                                color = PackSyncTheme.colors.textPrimary
-                            )
-                        }
-                    }
-
-                    Button(
-                        onClick = { onLocateEmergencyRider(primaryEmergency) },
-                        colors = ButtonDefaults.buttonColors(containerColor = PackSyncTheme.colors.destructiveRed),
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                    ) {
-                        Text("LOCATE", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    }
-                }
-            }
-        }
-    }
-}
-
-/**
- * RiderRadarPanel:
- * - Collapsed by default into a compact 44dp pill
- * - Expands on tap or swipe up to display telemetry for all convoy riders
- */
-@Composable
-fun RiderRadarPanel(
-    riders: List<RiderWithDistance>,
-    onRiderClick: (RiderWithDistance) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val fellowRiders = riders.filter { !it.isCurrentUser }
-    var isExpanded by remember { mutableStateOf(false) }
-
-    val infiniteTransition = rememberInfiniteTransition(label = "RadarPulse")
-    val pulseAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.4f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1200, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "pulseAlpha"
-    )
-
-    Surface(
-        shape = RoundedCornerShape(22.dp),
-        color = PackSyncTheme.colors.surface,
-        border = BorderStroke(1.5.dp, PackSyncTheme.colors.border),
-        shadowElevation = 8.dp,
-        modifier = modifier.fillMaxWidth()
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp)
-        ) {
-            // Header bar (Pill mode when collapsed)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .clickable { isExpanded = !isExpanded }
-                    .padding(vertical = 4.dp, horizontal = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(28.dp)
-                            .clip(CircleShape)
-                            .background(PackSyncTheme.colors.liveGreen.copy(alpha = 0.2f * pulseAlpha)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Radar,
-                            contentDescription = "Radar",
-                            tint = PackSyncTheme.colors.liveGreen,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-
-                    Text(
-                        text = "CONVOY RADAR",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        letterSpacing = 1.sp,
-                        color = PackSyncTheme.colors.textPrimary
-                    )
-
-                    Surface(
-                        shape = RoundedCornerShape(999.dp),
-                        color = PackSyncTheme.colors.surfaceRaised,
-                        border = BorderStroke(1.dp, PackSyncTheme.colors.border)
-                    ) {
-                        Text(
-                            text = if (fellowRiders.isEmpty()) "Solo" else "${fellowRiders.size} in Pack",
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                            fontSize = 10.sp,
+                            text = "Fit Route",
+                            fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
-                            color = PackSyncTheme.colors.textSecondary
+                            color = PackSyncTheme.colors.textPrimary,
+                            maxLines = 1
                         )
-                    }
-                }
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    if (!isExpanded) {
-                        Text(
-                            text = if (fellowRiders.isEmpty()) "0 Nearby" else "View",
-                            fontSize = 11.sp,
-                            color = PackSyncTheme.colors.textTertiary
-                        )
-                    }
-                    Icon(
-                        imageVector = if (isExpanded) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp,
-                        contentDescription = if (isExpanded) "Collapse" else "Expand",
-                        tint = PackSyncTheme.colors.textSecondary,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-            }
-
-            // Expanded Telemetry Roster
-            AnimatedVisibility(visible = isExpanded) {
-                Column(modifier = Modifier.padding(top = 10.dp)) {
-                    if (fellowRiders.isEmpty()) {
-                        Text(
-                            text = "Waiting for other riders to join convoy...",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = PackSyncTheme.colors.textSecondary,
-                            fontSize = 12.sp,
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
-                    } else {
-                        Column(
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.heightIn(max = 180.dp)
-                        ) {
-                            fellowRiders.forEach { item ->
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(PackSyncTheme.colors.surfaceRaised)
-                                        .border(1.dp, PackSyncTheme.colors.border, RoundedCornerShape(12.dp))
-                                        .clickable { onRiderClick(item) }
-                                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    // Ahead / Behind arrow badge
-                                    when (item.isAhead) {
-                                        true -> {
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(24.dp)
-                                                    .clip(CircleShape)
-                                                    .background(PackSyncTheme.colors.liveGreen.copy(alpha = 0.2f)),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Default.ArrowUpward,
-                                                    contentDescription = "Ahead",
-                                                    tint = PackSyncTheme.colors.liveGreen,
-                                                    modifier = Modifier.size(14.dp)
-                                                )
-                                            }
-                                        }
-                                        false -> {
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(24.dp)
-                                                    .clip(CircleShape)
-                                                    .background(Color(0xFFFFB300).copy(alpha = 0.2f)),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Default.ArrowDownward,
-                                                    contentDescription = "Behind",
-                                                    tint = Color(0xFFFFB300),
-                                                    modifier = Modifier.size(14.dp)
-                                                )
-                                            }
-                                        }
-                                        null -> {
-                                            Text(text = item.rider.riderStatus.emoji, fontSize = 14.sp)
-                                        }
-                                    }
-
-                                    Spacer(modifier = Modifier.width(10.dp))
-
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = item.relativePositionText,
-                                            fontWeight = FontWeight.Bold,
-                                            color = PackSyncTheme.colors.textPrimary,
-                                            fontSize = 13.sp
-                                        )
-                                        if (item.rider.speed > 0f) {
-                                            Text(
-                                                text = "${LocationUtils.formatSpeed(item.rider.speed)} • ${item.rider.riderStatus.displayName}",
-                                                color = PackSyncTheme.colors.textSecondary,
-                                                fontSize = 11.sp
-                                            )
-                                        }
-                                    }
-
-                                    Text(
-                                        text = item.rider.riderStatus.emoji,
-                                        fontSize = 16.sp
-                                    )
-                                }
-                            }
-                        }
                     }
                 }
             }
@@ -1203,9 +1366,10 @@ fun RiderRadarPanel(
 }
 
 /**
- * BottomControlDock:
- * - "MY STATUS" Hero button on the left (largest control, 58dp height, heavy green border)
- * - Three 56dp glove-friendly circular action buttons: Riders List, Route Toggle, Recenter on Me
+ * Ergonomic Bottom Control Dock:
+ * - "MY STATUS" Hero button on the left (54dp height, dynamic icon, status color, text truncation)
+ * - Three 54dp glove-friendly circular action buttons: Riders List, Route Toggle, Recenter on Me
+ * - All controls have equal 54dp height and are baseline/center-aligned.
  */
 @Composable
 private fun BottomControlDock(
@@ -1218,23 +1382,32 @@ private fun BottomControlDock(
     onRecenterClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val buttonHeight = 54.dp
+    val statusAccent = myStatus.color
+
+    val statusIcon = when (myStatus) {
+        RiderStatus.RIDING -> Icons.Default.TwoWheeler
+        RiderStatus.REFUELING -> Icons.Default.LocalGasStation
+        RiderStatus.PUNCTURE -> Icons.Default.Build
+        RiderStatus.REST -> Icons.Default.LocalCafe
+        RiderStatus.EMERGENCY -> Icons.Default.Security
+        RiderStatus.OTHER -> Icons.Default.WarningAmber
+    }
+
     Row(
         modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // "MY STATUS" Hero Pill Button
-        val isRiding = myStatus == RiderStatus.RIDING
-        val statusAccent = if (isRiding) PackSyncTheme.colors.liveGreen else myStatus.color
-
+        // "MY STATUS" Hero Pill Button (54dp height)
         Surface(
-            shape = RoundedCornerShape(26.dp),
+            shape = RoundedCornerShape(27.dp),
             color = PackSyncTheme.colors.surface,
             border = BorderStroke(2.dp, statusAccent),
-            shadowElevation = 8.dp,
+            shadowElevation = 4.dp,
             modifier = Modifier
                 .weight(1f)
-                .height(60.dp)
+                .height(buttonHeight)
                 .clickable(onClick = onStatusClick)
         ) {
             Row(
@@ -1245,32 +1418,33 @@ private fun BottomControlDock(
             ) {
                 Box(
                     modifier = Modifier
-                        .size(36.dp)
+                        .size(34.dp)
                         .clip(CircleShape)
                         .background(statusAccent.copy(alpha = 0.2f)),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = Icons.Default.TwoWheeler,
-                        contentDescription = "Status",
+                        imageVector = statusIcon,
+                        contentDescription = myStatus.displayName,
                         tint = statusAccent,
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(18.dp)
                     )
                 }
 
                 Spacer(modifier = Modifier.width(10.dp))
 
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "MY STATUS",
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 1.sp,
-                        color = PackSyncTheme.colors.textTertiary
+                        color = PackSyncTheme.colors.textTertiary,
+                        maxLines = 1
                     )
                     Text(
                         text = myStatus.displayName.uppercase(),
-                        fontSize = 15.sp,
+                        fontSize = 14.sp,
                         fontWeight = FontWeight.Black,
                         color = statusAccent,
                         maxLines = 1,
@@ -1280,11 +1454,11 @@ private fun BottomControlDock(
             }
         }
 
-        // 1. Riders List Button
+        // 1. Riders List Button (54dp)
         IconButton(
             onClick = onRiderListClick,
             modifier = Modifier
-                .size(54.dp)
+                .size(buttonHeight)
                 .clip(CircleShape)
                 .background(PackSyncTheme.colors.surface)
                 .border(1.5.dp, PackSyncTheme.colors.border, CircleShape)
@@ -1297,12 +1471,12 @@ private fun BottomControlDock(
             )
         }
 
-        // 2. Route Directions Toggle Button
+        // 2. Route Directions Toggle Button (54dp)
         val isRouteActive = hasPlannedRoute && isRouteVisible
         IconButton(
             onClick = onToggleRouteClick,
             modifier = Modifier
-                .size(54.dp)
+                .size(buttonHeight)
                 .clip(CircleShape)
                 .background(if (isRouteActive) PackSyncTheme.colors.surfaceRaised else PackSyncTheme.colors.surface)
                 .border(
@@ -1319,11 +1493,11 @@ private fun BottomControlDock(
             )
         }
 
-        // 3. Recenter on Me Button
+        // 3. Recenter on Me Button (54dp)
         IconButton(
             onClick = onRecenterClick,
             modifier = Modifier
-                .size(54.dp)
+                .size(buttonHeight)
                 .clip(CircleShape)
                 .background(PackSyncTheme.colors.surface)
                 .border(1.5.dp, PackSyncTheme.colors.liveGreen.copy(alpha = 0.6f), CircleShape)

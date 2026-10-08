@@ -467,13 +467,14 @@ class RideRepository {
     /**
      * Updates the current rider's stop status (e.g. Refueling, Emergency, Rest Stop).
      */
-    fun updateStatus(rideCode: String, riderId: String, status: RiderStatus) {
+    fun updateStatus(rideCode: String, riderId: String, status: RiderStatus): com.google.android.gms.tasks.Task<Void>? {
         val cleanCode = rideCode.trim().uppercase()
+        if (cleanCode.isEmpty() || riderId.isEmpty()) return null
         val updates = mapOf<String, Any>(
             "status" to status.name,
             "lastUpdated" to System.currentTimeMillis()
         )
-        ridesRef.child(cleanCode).child("riders").child(riderId).updateChildren(updates)
+        return ridesRef.child(cleanCode).child("riders").child(riderId).updateChildren(updates)
     }
 
     /**

@@ -10,3 +10,4 @@ local.properties
 .idea/
 web/
 brag-output/
+.kotlin/

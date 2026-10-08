@@ -59,7 +59,9 @@ data class MapUiState(
     val isStatusPickerOpen: Boolean = false,
     val isRiderListOpen: Boolean = false,
     val isLoading: Boolean = false,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val userBearing: Float? = null,
+    val userSpeed: Float = 0f
 )
 
 class MapViewModel(
@@ -223,6 +225,7 @@ class MapViewModel(
         }
 
         // Re-process UI state with updated location
+        _uiState.update { it.copy(userBearing = heading, userSpeed = speed) }
         updateRidersWithLocalLocation()
     }
 
@@ -288,12 +291,14 @@ class MapViewModel(
         // Find current user in latest Firebase list or fallback to local sensor location
         val firebaseMe = latestFirebaseRiders.find { it.id == myId }
         val effectiveMe = if (localCurrentLocation != null && localCurrentLocation?.lat != 0.0) {
-            // Keep local GPS coordinates if they are valid, but keep status from Firebase if updated
+            // Keep local GPS coordinates and use local myStatus as single source of truth
             localCurrentLocation!!.copy(
-                status = firebaseMe?.status ?: myStatus.name
+                status = myStatus.name
             )
         } else if (firebaseMe != null && firebaseMe.lat != 0.0) {
-            firebaseMe
+            firebaseMe.copy(
+                status = myStatus.name
+            )
         } else {
             localCurrentLocation ?: Rider(
                 id = myId,
@@ -377,7 +382,6 @@ class MapViewModel(
         _uiState.update {
             it.copy(
                 riders = ridersWithDistance,
-                myStatus = effectiveMe.riderStatus,
                 isLoading = false
             )
         }
@@ -385,20 +389,36 @@ class MapViewModel(
 
     /**
      * Updates the current rider's status (e.g. Refueling, Emergency, Riding).
-     * Synchronizes to both Firebase and the Foreground Service notification.
+     * Optimistically updates local state immediately, broadcasts to Firebase,
+     * and rolls back with an error if broadcast fails.
      */
     fun setRiderStatus(status: RiderStatus) {
         val rideCode = _uiState.value.rideCode
         val riderId = _uiState.value.currentRiderId
+        val previousStatus = _uiState.value.myStatus
 
-        _uiState.update { it.copy(myStatus = status, isStatusPickerOpen = false) }
+        // 1. Immediate optimistic local update
+        _uiState.update { it.copy(myStatus = status, isStatusPickerOpen = false, errorMessage = null) }
+        localCurrentLocation = localCurrentLocation?.copy(status = status.name)
+        updateRidersWithLocalLocation()
 
-        // Update in Firebase Realtime Database
+        // 2. Broadcast to Firebase Realtime Database with rollback on error
         if (rideCode.isNotEmpty() && riderId.isNotEmpty()) {
-            repository.updateStatus(rideCode, riderId, status)
+            repository.updateStatus(rideCode, riderId, status)?.addOnFailureListener { e ->
+                Log.e("RideSafeDebug", "Failed to broadcast status update: ${e.message}", e)
+                _uiState.update {
+                    it.copy(
+                        myStatus = previousStatus,
+                        errorMessage = "Status update failed. Rolled back."
+                    )
+                }
+                localCurrentLocation = localCurrentLocation?.copy(status = previousStatus.name)
+                updateRidersWithLocalLocation()
+                LocationTrackingService.updateStatus(getApplication(), previousStatus)
+            }
         }
 
-        // Update Foreground Service notification
+        // 3. Update Foreground Service notification
         LocationTrackingService.updateStatus(getApplication(), status)
     }
 

@@ -7,18 +7,24 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Check
@@ -51,6 +57,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ridesafe.app.data.model.RiderStatus
@@ -62,8 +69,8 @@ import kotlinx.coroutines.launch
  * Built for motorcycle glove ergonomics:
  * - Pinned bottom sheet reachable by thumb
  * - Full-width "Resume Riding" hero button at top
- * - 2-column grid of large 80dp+ tiles for stop categories
- * - Consistent 2.2px custom line icons (replacing emojis)
+ * - 2-column grid of equal-height tiles for stop categories with min-height and content sizing
+ * - Consistent 2.2px custom line icons
  * - Emergency SOS isolated at the bottom with a 2-second Press-and-Hold circular progress lockout
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -94,27 +101,37 @@ fun StopStatusDialog(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp)
-                .padding(bottom = 28.dp),
+                .navigationBarsPadding()
+                .padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Header: Title + Subtitle + Close Button
+            // Header: Title + Subtitle + 44dp Close Button (properly aligned, never clipped)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 8.dp)
+                ) {
                     Text(
                         text = "Update Ride Status",
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.ExtraBold,
-                        color = PackSyncTheme.colors.textPrimary
+                        color = PackSyncTheme.colors.textPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        text = "Broadcast your real-time status to the convoy",
+                        text = "Broadcast your status to the convoy",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = PackSyncTheme.colors.textSecondary
+                        color = PackSyncTheme.colors.textSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
                 IconButton(
@@ -127,7 +144,8 @@ fun StopStatusDialog(
                     Icon(
                         imageVector = Icons.Default.Close,
                         contentDescription = "Close",
-                        tint = PackSyncTheme.colors.textSecondary
+                        tint = PackSyncTheme.colors.textSecondary,
+                        modifier = Modifier.size(20.dp)
                     )
                 }
             }
@@ -222,11 +240,13 @@ fun StopStatusDialog(
                 color = PackSyncTheme.colors.textTertiary
             )
 
-            // 2. 2-Column Stop Category Grid
+            // 2. 2-Column Stop Category Grid (Equal-height per row, min-height with content sizing)
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 // Row 1: Refueling & Tire Puncture
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(IntrinsicSize.Min),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     StopOptionTile(
@@ -251,7 +271,9 @@ fun StopStatusDialog(
 
                 // Row 2: Rest Stop & Other Stop
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(IntrinsicSize.Min),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     StopOptionTile(
@@ -299,7 +321,8 @@ private fun StopOptionTile(
 
     Column(
         modifier = modifier
-            .height(96.dp)
+            .fillMaxHeight()
+            .heightIn(min = 96.dp)
             .clip(RoundedCornerShape(18.dp))
             .background(tileBg)
             .border(
@@ -308,7 +331,7 @@ private fun StopOptionTile(
                 shape = RoundedCornerShape(18.dp)
             )
             .clickable(onClick = onClick)
-            .padding(14.dp),
+            .padding(16.dp),
         verticalArrangement = Arrangement.SpaceBetween
     ) {
         Row(
@@ -343,19 +366,25 @@ private fun StopOptionTile(
             }
         }
 
+        Spacer(modifier = Modifier.height(10.dp))
+
         Column {
             Text(
                 text = title,
                 fontSize = 14.sp,
+                lineHeight = 18.sp,
                 fontWeight = FontWeight.Bold,
                 color = if (isSelected) status.color else PackSyncTheme.colors.textPrimary,
-                maxLines = 1
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
             Text(
                 text = subtitle,
                 fontSize = 11.sp,
+                lineHeight = 15.sp,
                 color = PackSyncTheme.colors.textSecondary,
-                maxLines = 1
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }
