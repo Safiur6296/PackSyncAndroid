@@ -1,8 +1,12 @@
 package com.ridesafe.app.ui.screens.map
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,149 +20,420 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material.icons.filled.LocalCafe
+import androidx.compose.material.icons.filled.LocalGasStation
+import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.TwoWheeler
+import androidx.compose.material.icons.filled.WarningAmber
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.SheetState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import com.ridesafe.app.data.model.RiderStatus
-import com.ridesafe.app.ui.theme.BikerBorder
-import com.ridesafe.app.ui.theme.BikerCardBg
-import com.ridesafe.app.ui.theme.BikerDarkBg
-import com.ridesafe.app.ui.theme.BikerSurfaceElevated
-import com.ridesafe.app.ui.theme.RideSafeTheme
-import com.ridesafe.app.ui.theme.TextPrimary
-import com.ridesafe.app.ui.theme.TextSecondary
+import com.ridesafe.app.ui.theme.PackSyncTheme
+import kotlinx.coroutines.launch
 
 /**
- * StopStatusDialog allows a rider to quickly broadcast why they stopped
- * or resume riding with a single tap.
+ * Redesigned Update Ride Status Bottom Sheet.
+ * Built for motorcycle glove ergonomics:
+ * - Pinned bottom sheet reachable by thumb
+ * - Full-width "Resume Riding" hero button at top
+ * - 2-column grid of large 80dp+ tiles for stop categories
+ * - Consistent 2.2px custom line icons (replacing emojis)
+ * - Emergency SOS isolated at the bottom with a 2-second Press-and-Hold circular progress lockout
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StopStatusDialog(
     currentStatus: RiderStatus,
     onStatusSelected: (RiderStatus) -> Unit,
     onDismiss: () -> Unit
 ) {
-    Dialog(onDismissRequest = onDismiss) {
-        Card(
-            shape = RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(containerColor = BikerCardBg),
+    val sheetState: SheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = PackSyncTheme.colors.surface,
+        dragHandle = {
+            Box(
+                modifier = Modifier
+                    .padding(top = 12.dp, bottom = 6.dp)
+                    .width(48.dp)
+                    .height(5.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(PackSyncTheme.colors.border)
+            )
+        },
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+    ) {
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .border(1.dp, BikerBorder, RoundedCornerShape(24.dp))
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Column(
+            // Header: Title + Subtitle + Close Button
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        text = "Update Ride Status",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = PackSyncTheme.colors.textPrimary
+                    )
+                    Text(
+                        text = "Broadcast your real-time status to the convoy",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = PackSyncTheme.colors.textSecondary
+                    )
+                }
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .background(PackSyncTheme.colors.surfaceRaised)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Close",
+                        tint = PackSyncTheme.colors.textSecondary
+                    )
+                }
+            }
+
+            // 1. Primary Full-Width Action: Resume Riding
+            val isRidingActive = currentStatus == RiderStatus.RIDING
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(20.dp)
+                    .height(72.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(
+                        if (isRidingActive) PackSyncTheme.colors.liveGreen.copy(alpha = 0.16f)
+                        else PackSyncTheme.colors.surfaceRaised
+                    )
+                    .border(
+                        width = if (isRidingActive) 2.dp else 1.dp,
+                        color = if (isRidingActive) PackSyncTheme.colors.liveGreen else PackSyncTheme.colors.border,
+                        shape = RoundedCornerShape(20.dp)
+                    )
+                    .clickable { onStatusSelected(RiderStatus.RIDING) }
+                    .padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                // Header
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                Box(
+                    modifier = Modifier
+                        .size(46.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (isRidingActive) PackSyncTheme.colors.liveGreen
+                            else PackSyncTheme.colors.liveGreen.copy(alpha = 0.18f)
+                        ),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Column {
-                        Text(
-                            text = "Update Ride Status",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = TextPrimary
-                        )
-                        Text(
-                            text = "Notify your group of stops",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = TextSecondary
-                        )
-                    }
-                    IconButton(onClick = onDismiss) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Close",
-                            tint = TextSecondary
-                        )
-                    }
+                    Icon(
+                        imageVector = Icons.Default.TwoWheeler,
+                        contentDescription = "Riding",
+                        tint = if (isRidingActive) Color.Black else PackSyncTheme.colors.liveGreen,
+                        modifier = Modifier.size(26.dp)
+                    )
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.width(14.dp))
 
-                // List of selectable statuses
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    RiderStatus.entries.forEach { status ->
-                        val isSelected = status == currentStatus
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Resume Riding",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isRidingActive) PackSyncTheme.colors.liveGreen else PackSyncTheme.colors.textPrimary
+                    )
+                    Text(
+                        text = "Moving normally with the pack",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = PackSyncTheme.colors.textSecondary
+                    )
+                }
 
-                        StatusOptionItem(
-                            status = status,
-                            isSelected = isSelected,
-                            onClick = {
-                                onStatusSelected(status)
-                            }
-                        )
+                if (isRidingActive) {
+                    Surface(
+                        shape = RoundedCornerShape(999.dp),
+                        color = PackSyncTheme.colors.liveGreen
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = null,
+                                tint = Color.Black,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = "ACTIVE",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Black,
+                                color = Color.Black
+                            )
+                        }
                     }
                 }
             }
+
+            // Section Label
+            Text(
+                text = "OR REPORT A STOP REASON:",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.sp,
+                color = PackSyncTheme.colors.textTertiary
+            )
+
+            // 2. 2-Column Stop Category Grid
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                // Row 1: Refueling & Tire Puncture
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    StopOptionTile(
+                        modifier = Modifier.weight(1f),
+                        icon = Icons.Default.LocalGasStation,
+                        title = "Refueling",
+                        subtitle = "Stopped at gas station",
+                        status = RiderStatus.REFUELING,
+                        isSelected = currentStatus == RiderStatus.REFUELING,
+                        onClick = { onStatusSelected(RiderStatus.REFUELING) }
+                    )
+                    StopOptionTile(
+                        modifier = Modifier.weight(1f),
+                        icon = Icons.Default.Build,
+                        title = "Tire Puncture",
+                        subtitle = "Flat tire or repair",
+                        status = RiderStatus.PUNCTURE,
+                        isSelected = currentStatus == RiderStatus.PUNCTURE,
+                        onClick = { onStatusSelected(RiderStatus.PUNCTURE) }
+                    )
+                }
+
+                // Row 2: Rest Stop & Other Stop
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    StopOptionTile(
+                        modifier = Modifier.weight(1f),
+                        icon = Icons.Default.LocalCafe,
+                        title = "Rest Stop",
+                        subtitle = "Breather or coffee",
+                        status = RiderStatus.REST,
+                        isSelected = currentStatus == RiderStatus.REST,
+                        onClick = { onStatusSelected(RiderStatus.REST) }
+                    )
+                    StopOptionTile(
+                        modifier = Modifier.weight(1f),
+                        icon = Icons.Default.WarningAmber,
+                        title = "Other Stop",
+                        subtitle = "Temporary pause",
+                        status = RiderStatus.OTHER,
+                        isSelected = currentStatus == RiderStatus.OTHER,
+                        onClick = { onStatusSelected(RiderStatus.OTHER) }
+                    )
+                }
+            }
+
+            // 3. Isolated Emergency SOS Card with 2-Second Hold Lockout
+            EmergencyHoldCard(
+                isActive = currentStatus == RiderStatus.EMERGENCY,
+                onTriggered = { onStatusSelected(RiderStatus.EMERGENCY) }
+            )
         }
     }
 }
 
 @Composable
-private fun StatusOptionItem(
+private fun StopOptionTile(
+    modifier: Modifier = Modifier,
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
     status: RiderStatus,
     isSelected: Boolean,
     onClick: () -> Unit
 ) {
-    val backgroundColor = if (isSelected) {
-        status.color.copy(alpha = 0.18f)
-    } else {
-        BikerSurfaceElevated
-    }
+    val tileBg = if (isSelected) status.color.copy(alpha = 0.16f) else PackSyncTheme.colors.surfaceRaised
+    val tileBorder = if (isSelected) status.color else PackSyncTheme.colors.border
 
-    val borderColor = if (isSelected) {
-        status.color
-    } else {
-        BikerBorder
+    Column(
+        modifier = modifier
+            .height(96.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(tileBg)
+            .border(
+                width = if (isSelected) 2.dp else 1.dp,
+                color = tileBorder,
+                shape = RoundedCornerShape(18.dp)
+            )
+            .clickable(onClick = onClick)
+            .padding(14.dp),
+        verticalArrangement = Arrangement.SpaceBetween
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (isSelected) status.color else PackSyncTheme.colors.surface
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = title,
+                    tint = if (isSelected) Color.Black else PackSyncTheme.colors.textPrimary,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+
+            if (isSelected) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(status.color)
+                )
+            }
+        }
+
+        Column {
+            Text(
+                text = title,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (isSelected) status.color else PackSyncTheme.colors.textPrimary,
+                maxLines = 1
+            )
+            Text(
+                text = subtitle,
+                fontSize = 11.sp,
+                color = PackSyncTheme.colors.textSecondary,
+                maxLines = 1
+            )
+        }
     }
+}
+
+/**
+ * Emergency SOS Card with 2-second press-and-hold lockout to prevent accidental activation.
+ */
+@Composable
+private fun EmergencyHoldCard(
+    isActive: Boolean,
+    onTriggered: () -> Unit
+) {
+    val redColor = PackSyncTheme.colors.destructiveRed
+    val holdProgress = remember { Animatable(0f) }
+    var isHolding by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
+
+    val cardBg = if (isActive || isHolding) redColor.copy(alpha = 0.22f) else redColor.copy(alpha = 0.10f)
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(backgroundColor)
+            .height(82.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .background(cardBg)
             .border(
-                width = if (isSelected) 2.dp else 1.dp,
-                color = borderColor,
-                shape = RoundedCornerShape(14.dp)
+                width = if (isActive || isHolding) 2.5.dp else 1.5.dp,
+                color = redColor,
+                shape = RoundedCornerShape(20.dp)
             )
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onPress = {
+                        isHolding = true
+                        var triggered = false
+                        val job = coroutineScope.launch {
+                            holdProgress.animateTo(
+                                targetValue = 1f,
+                                animationSpec = tween(durationMillis = 2000, easing = LinearEasing)
+                            )
+                            if (holdProgress.value >= 1f) {
+                                triggered = true
+                                onTriggered()
+                            }
+                        }
+                        try {
+                            tryAwaitRelease()
+                        } finally {
+                            job.cancel()
+                            if (!triggered) {
+                                coroutineScope.launch { holdProgress.snapTo(0f) }
+                            }
+                            isHolding = false
+                        }
+                    }
+                )
+            }
+            .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Status Emoji with colored circular background
+        // Left circular progress indicator around SOS shield
         Box(
-            modifier = Modifier
-                .size(38.dp)
-                .clip(CircleShape)
-                .background(status.color.copy(alpha = 0.25f)),
+            modifier = Modifier.size(52.dp),
             contentAlignment = Alignment.Center
         ) {
-            Text(
-                text = status.emoji,
-                fontSize = 18.sp
+            CircularProgressIndicator(
+                progress = { if (isActive) 1f else holdProgress.value },
+                modifier = Modifier.size(52.dp),
+                color = redColor,
+                trackColor = redColor.copy(alpha = 0.25f),
+                strokeWidth = 4.dp
+            )
+            Icon(
+                imageVector = Icons.Default.Security,
+                contentDescription = "Emergency SOS",
+                tint = redColor,
+                modifier = Modifier.size(24.dp)
             )
         }
 
@@ -166,46 +441,37 @@ private fun StatusOptionItem(
 
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = if (status == RiderStatus.RIDING) "Resume Riding" else status.displayName,
+                text = if (isHolding) "HOLDING TO BROADCAST..." else "Emergency SOS",
                 style = MaterialTheme.typography.titleMedium,
-                color = if (isSelected) status.color else TextPrimary,
-                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                fontWeight = FontWeight.ExtraBold,
+                color = redColor
             )
             Text(
-                text = when (status) {
-                    RiderStatus.RIDING -> "Moving normally with the pack"
-                    RiderStatus.REFUELING -> "Stopped at a gas station"
-                    RiderStatus.PUNCTURE -> "Flat tire or mechanical repair"
-                    RiderStatus.REST -> "Breather, snack, or coffee"
-                    RiderStatus.EMERGENCY -> "Immediate assistance needed"
-                    RiderStatus.OTHER -> "Temporary pause / waiting"
+                text = if (isHolding) {
+                    val remaining = ((1f - holdProgress.value) * 2f).coerceAtLeast(0f)
+                    String.format("%.1fs remaining • Release to cancel", remaining)
+                } else if (isActive) {
+                    "ACTIVE • Convoy broadcast in progress"
+                } else {
+                    "Hold 2s • Immediate help needed"
                 },
-                style = MaterialTheme.typography.bodyMedium,
-                color = TextSecondary,
-                fontSize = 12.sp
+                style = MaterialTheme.typography.bodySmall,
+                color = PackSyncTheme.colors.textSecondary
             )
         }
 
-        if (isSelected) {
-            Box(
-                modifier = Modifier
-                    .size(10.dp)
-                    .clip(CircleShape)
-                    .background(status.color)
+        Surface(
+            shape = RoundedCornerShape(999.dp),
+            color = if (isActive) redColor else redColor.copy(alpha = 0.2f),
+            border = androidx.compose.foundation.BorderStroke(1.dp, redColor)
+        ) {
+            Text(
+                text = if (isActive) "ACTIVE" else if (isHolding) "HOLD" else "HOLD 2s",
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Black,
+                color = if (isActive) Color.White else redColor
             )
         }
     }
 }
-
-@Preview(showBackground = true, backgroundColor = 0xFF101216)
-@Composable
-fun StopStatusDialogPreview() {
-    RideSafeTheme {
-        StopStatusDialog(
-            currentStatus = RiderStatus.REFUELING,
-            onStatusSelected = {},
-            onDismiss = {}
-        )
-    }
-}
-

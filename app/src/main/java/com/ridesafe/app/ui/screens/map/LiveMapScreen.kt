@@ -3,20 +3,35 @@ package com.ridesafe.app.ui.screens.map
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.RectF
+import android.graphics.Typeface
+import android.graphics.drawable.BitmapDrawable
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -25,34 +40,32 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.AltRoute
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.FitScreen
 import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Radar
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.material.icons.filled.TwoWheeler
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.defaultMinSize
-import androidx.compose.foundation.layout.height
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Color
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -62,10 +75,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -74,37 +88,13 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.Paint
-import android.graphics.Path
-import android.graphics.RectF
-import android.graphics.Typeface
-import android.graphics.drawable.BitmapDrawable
-import androidx.compose.ui.graphics.toArgb
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.material.icons.filled.ArrowDownward
-import androidx.compose.material.icons.filled.ArrowUpward
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.Navigation
 import com.google.android.gms.location.LocationServices
-import com.ridesafe.app.ui.theme.RideSafeTheme
 import com.ridesafe.app.data.model.RiderStatus
-import com.ridesafe.app.ui.theme.BikerAmber
-import com.ridesafe.app.ui.theme.BikerBorder
-import com.ridesafe.app.ui.theme.BikerCardBg
-import com.ridesafe.app.ui.theme.BikerDarkBg
-import com.ridesafe.app.ui.theme.BikerSurfaceElevated
-import com.ridesafe.app.ui.theme.StatusRed
-import com.ridesafe.app.ui.theme.TextMuted
-import com.ridesafe.app.ui.theme.TextPrimary
-import com.ridesafe.app.ui.theme.TextSecondary
-import com.ridesafe.app.util.LocationUtils
-import androidx.compose.material.icons.automirrored.filled.AltRoute
 import com.ridesafe.app.data.model.TripInfo
-import com.ridesafe.app.ui.theme.StatusBlue
-import com.ridesafe.app.ui.theme.StatusGreen
+import com.ridesafe.app.ui.theme.BikerDarkBg
+import com.ridesafe.app.ui.theme.PackSyncTheme
+import com.ridesafe.app.ui.theme.RideSafeTheme
+import com.ridesafe.app.util.LocationUtils
 import com.ridesafe.app.util.PolylineUtils
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
@@ -114,12 +104,16 @@ import org.osmdroid.views.overlay.Marker as OsmMarker
 import org.osmdroid.views.overlay.Polyline as OsmPolyline
 
 /**
- * Creates a glowing amber circular badge for the current user ("You").
- * Matches the premium dark cockpit amber theme with concentric glow rings,
- * electric amber border, status emoji, "YOU" condensed label, and an amber pointer pin.
+ * Creates a high-contrast directional puck for the current user ("YOU").
+ * Designed for immediate glanceability through helmet visors:
+ * - High-contrast concentric outer halo with live status color
+ * - Solid high-contrast core
+ * - Forward-pointing navigation heading chevron
+ * - Live semantic status pip
+ * - Glanceable "YOU" label
  */
 private fun createCurrentUserMarkerBitmap(status: RiderStatus): Bitmap {
-    val diameter = 90f
+    val diameter = 94f
     val pointerHeight = 18f
     val totalHeight = diameter + pointerHeight
     val totalWidth = diameter
@@ -130,72 +124,65 @@ private fun createCurrentUserMarkerBitmap(status: RiderStatus): Bitmap {
     val centerX = totalWidth / 2f
     val centerY = diameter / 2f
 
-    // 1. Soft outer amber glow
+    // 1. Soft live-status outer pulse ring
     val outerGlowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.parseColor("#26FFB300")
+        color = android.graphics.Color.parseColor("#3330D158")
         style = Paint.Style.FILL
     }
-    canvas.drawCircle(centerX, centerY, 44f, outerGlowPaint)
+    canvas.drawCircle(centerX, centerY, 46f, outerGlowPaint)
 
-    // 2. Middle amber glow ring
-    val midGlowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.parseColor("#4DFFB300")
-        style = Paint.Style.FILL
-    }
-    canvas.drawCircle(centerX, centerY, 38f, midGlowPaint)
-
-    // 3. Dark glassmorphic badge center
+    // 2. High-contrast solid dark puck center
     val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.parseColor("#14171E")
+        color = android.graphics.Color.parseColor("#141416")
         style = Paint.Style.FILL
     }
-    canvas.drawCircle(centerX, centerY, 32f, bgPaint)
+    canvas.drawCircle(centerX, centerY, 34f, bgPaint)
 
-    // 4. Solid electric amber circular border
+    // 3. Crisp outer border
     val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.parseColor("#FFB300")
+        color = android.graphics.Color.parseColor("#FAFAFA")
         style = Paint.Style.STROKE
-        strokeWidth = 4.5f
+        strokeWidth = 4f
     }
-    canvas.drawCircle(centerX, centerY, 32f, strokePaint)
+    canvas.drawCircle(centerX, centerY, 34f, strokePaint)
 
-    // 5. Inverted pointer pin pointing to exact GPS coordinate
-    val pointerPath = Path().apply {
-        moveTo(centerX - 8f, centerY + 28f)
-        lineTo(centerX + 8f, centerY + 28f)
-        lineTo(centerX, totalHeight - 2f)
+    // 4. Directional heading chevron (pointing upward in puck)
+    val chevronPath = Path().apply {
+        moveTo(centerX, centerY - 18f)
+        lineTo(centerX + 12f, centerY + 10f)
+        lineTo(centerX, centerY + 4f)
+        lineTo(centerX - 12f, centerY + 10f)
         close()
     }
-    val pointerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.parseColor("#FFB300")
+    val chevronPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.parseColor("#FAFAFA")
         style = Paint.Style.FILL
     }
-    canvas.drawPath(pointerPath, pointerPaint)
+    canvas.drawPath(chevronPath, chevronPaint)
 
-    // 6. Draw Status emoji at center
-    val emojiPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        textSize = 26f
-        textAlign = Paint.Align.CENTER
+    // 5. Semantic status pip (Live green or status color)
+    val pipPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = when (status) {
+            RiderStatus.RIDING -> android.graphics.Color.parseColor("#30D158")
+            RiderStatus.EMERGENCY -> android.graphics.Color.parseColor("#FF453A")
+            else -> android.graphics.Color.parseColor("#FFB300")
+        }
+        style = Paint.Style.FILL
     }
-    val emojiBaseline = centerY - 4f - ((emojiPaint.descent() + emojiPaint.ascent()) / 2f)
-    canvas.drawText(status.emoji, centerX, emojiBaseline, emojiPaint)
+    canvas.drawCircle(centerX + 24f, centerY - 24f, 8f, pipPaint)
 
-    // 7. Draw "YOU" condensed label
-    val youTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        textSize = 13f
-        color = android.graphics.Color.parseColor("#FFB300")
-        typeface = Typeface.create("sans-serif-condensed", Typeface.BOLD)
-        textAlign = Paint.Align.CENTER
+    val pipBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.parseColor("#141416")
+        style = Paint.Style.STROKE
+        strokeWidth = 2.5f
     }
-    canvas.drawText("YOU", centerX, centerY + 20f, youTextPaint)
+    canvas.drawCircle(centerX + 24f, centerY - 24f, 8f, pipBorderPaint)
 
     return bitmap
 }
 
 /**
- * Creates a custom map pin bitmap with the rider's name and status emoji.
- * Displays e.g. "🏍️ Rahul (You)" or "⛽ Sahil" inside a sleek rounded pill
- * with an inverted pointer triangle pointing to the GPS coordinate.
+ * Creates a map pin bitmap for fellow riders with their name and status.
  */
 private fun createRiderMarkerBitmap(name: String, status: RiderStatus, isCurrentUser: Boolean): Bitmap {
     if (isCurrentUser) {
@@ -203,170 +190,153 @@ private fun createRiderMarkerBitmap(name: String, status: RiderStatus, isCurrent
     }
 
     val displayName = name.trim().ifEmpty { "Rider" }
-
     val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        textSize = 34f
+        textSize = 28f
         color = android.graphics.Color.WHITE
         typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
     }
 
-    val emojiPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        textSize = 38f
-        textAlign = Paint.Align.LEFT
-    }
-
     val textWidth = textPaint.measureText(displayName)
-    val horizontalPadding = 26f
-    val emojiWidth = 46f
-    val spacing = 12f
-    val contentWidth = emojiWidth + spacing + textWidth
-
-    val pillWidth = (contentWidth + horizontalPadding * 2f).coerceAtLeast(130f)
-    val pillHeight = 74f
-    val pointerHeight = 22f
+    val horizontalPadding = 20f
+    val pillWidth = (textWidth + horizontalPadding * 2f).coerceAtLeast(110f)
+    val pillHeight = 56f
+    val pointerHeight = 14f
     val totalHeight = pillHeight + pointerHeight
 
     val bitmap = Bitmap.createBitmap(pillWidth.toInt(), totalHeight.toInt(), Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
 
+    val accentColor = when (status) {
+        RiderStatus.RIDING -> android.graphics.Color.parseColor("#30D158")
+        RiderStatus.EMERGENCY -> android.graphics.Color.parseColor("#FF453A")
+        else -> android.graphics.Color.parseColor("#FFB300")
+    }
+
+    // Pill background
     val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.parseColor("#171A21")
+        color = android.graphics.Color.parseColor("#1C1C1E")
         style = Paint.Style.FILL
     }
-
-    val strokeColor = if (isCurrentUser) {
-        android.graphics.Color.parseColor("#FFC107")
-    } else {
-        status.color.toArgb()
-    }
-
     val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = strokeColor
+        color = accentColor
         style = Paint.Style.STROKE
-        strokeWidth = if (isCurrentUser) 5f else 3.5f
+        strokeWidth = 3f
     }
+    val rect = RectF(2f, 2f, pillWidth - 2f, pillHeight - 2f)
+    canvas.drawRoundRect(rect, 28f, 28f, bgPaint)
+    canvas.drawRoundRect(rect, 28f, 28f, strokePaint)
 
-    val fillAccentPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = strokeColor
-        style = Paint.Style.FILL
-    }
-
-    // Draw rounded badge rectangle
-    val rect = RectF(4f, 4f, pillWidth - 4f, pillHeight - 4f)
-    canvas.drawRoundRect(rect, 36f, 36f, bgPaint)
-    canvas.drawRoundRect(rect, 36f, 36f, strokePaint)
-
-    // Draw pointer pin triangle at bottom center
+    // Inverted pointer
     val centerX = pillWidth / 2f
     val pointerPath = Path().apply {
-        moveTo(centerX - 14f, pillHeight - 4f)
-        lineTo(centerX + 14f, pillHeight - 4f)
-        lineTo(centerX, totalHeight - 2f)
+        moveTo(centerX - 10f, pillHeight - 2f)
+        lineTo(centerX + 10f, pillHeight - 2f)
+        lineTo(centerX, totalHeight - 1f)
         close()
     }
-    canvas.drawPath(pointerPath, fillAccentPaint)
+    val pointerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = accentColor
+        style = Paint.Style.FILL
+    }
+    canvas.drawPath(pointerPath, pointerPaint)
 
-    // Draw status emoji
-    val startX = (pillWidth - contentWidth) / 2f
-    val emojiBaseline = pillHeight / 2f - ((emojiPaint.descent() + emojiPaint.ascent()) / 2f)
-    canvas.drawText(status.emoji, startX, emojiBaseline, emojiPaint)
-
-    // Draw name text
-    val textStartX = startX + emojiWidth + spacing
+    // Name text
+    val textX = (pillWidth - textWidth) / 2f
     val textBaseline = pillHeight / 2f - ((textPaint.descent() + textPaint.ascent()) / 2f)
-    canvas.drawText(displayName, textStartX, textBaseline, textPaint)
+    canvas.drawText(displayName, textX, textBaseline, textPaint)
 
     return bitmap
 }
 
 /**
- * Creates a distinctive custom pin for Start and Destination markers on the map,
- * with bright border accents (green for Start, coral red for Destination)
- * and label text displaying the location name.
+ * Creates custom waypoint pins for Start and Destination points.
+ * - Start point: Restrained, compact 44f waypoint circle with center dot (NO giant billboard card overlapping "YOU").
+ * - Destination: High-contrast checkered flag pin with destination name.
  */
 private fun createTripMarkerBitmap(name: String, isDestination: Boolean): Bitmap {
-    val prefix = if (isDestination) "🏁" else "🚩"
-    val label = if (isDestination) "DESTINATION" else "START"
-    val placeName = name.trim().ifEmpty { if (isDestination) "Destination" else "Start" }
-    val displayName = "$prefix $placeName"
+    if (!isDestination) {
+        // Restrained start waypoint node: clean circle ring that never obscures the rider puck
+        val size = 48f
+        val bitmap = Bitmap.createBitmap(size.toInt(), size.toInt(), Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        val center = size / 2f
+
+        val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.parseColor("#A1A1AA")
+            style = Paint.Style.STROKE
+            strokeWidth = 4f
+        }
+        val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.parseColor("#141416")
+            style = Paint.Style.FILL
+        }
+        val dotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.parseColor("#FAFAFA")
+            style = Paint.Style.FILL
+        }
+        canvas.drawCircle(center, center, center - 4f, bgPaint)
+        canvas.drawCircle(center, center, center - 4f, ringPaint)
+        canvas.drawCircle(center, center, 6f, dotPaint)
+        return bitmap
+    }
+
+    // Destination Waypoint Pin
+    val placeName = name.trim().ifEmpty { "Destination" }
+    val displayName = "🏁 $placeName"
 
     val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        textSize = 32f
+        textSize = 30f
         color = android.graphics.Color.WHITE
         typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
     }
 
-    val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        textSize = 20f
-        color = if (isDestination) android.graphics.Color.parseColor("#FFC107") else android.graphics.Color.parseColor("#69F0AE")
-        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-    }
-
     val textWidth = textPaint.measureText(displayName)
-    val labelWidth = labelPaint.measureText(label)
-    val contentWidth = maxOf(textWidth, labelWidth)
-    val horizontalPadding = 26f
-
-    val pillWidth = (contentWidth + horizontalPadding * 2f).coerceAtLeast(140f)
-    val pillHeight = 78f
-    val pointerHeight = 20f
+    val horizontalPadding = 24f
+    val pillWidth = (textWidth + horizontalPadding * 2f).coerceAtLeast(130f)
+    val pillHeight = 64f
+    val pointerHeight = 16f
     val totalHeight = pillHeight + pointerHeight
 
     val bitmap = Bitmap.createBitmap(pillWidth.toInt(), totalHeight.toInt(), Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
 
-    val bgColor = android.graphics.Color.parseColor("#171A21")
-    val strokeColor = if (isDestination) {
-        android.graphics.Color.parseColor("#FF5252") // Coral Red
-    } else {
-        android.graphics.Color.parseColor("#00E676") // Emerald Green
-    }
-
+    val strokeColor = android.graphics.Color.parseColor("#00B0FF")
     val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = bgColor
+        color = android.graphics.Color.parseColor("#141416")
         style = Paint.Style.FILL
     }
-
     val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = strokeColor
         style = Paint.Style.STROKE
-        strokeWidth = 4f
+        strokeWidth = 3.5f
     }
 
-    val fillAccentPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    val rect = RectF(3f, 3f, pillWidth - 3f, pillHeight - 3f)
+    canvas.drawRoundRect(rect, 32f, 32f, bgPaint)
+    canvas.drawRoundRect(rect, 32f, 32f, strokePaint)
+
+    val centerX = pillWidth / 2f
+    val pointerPath = Path().apply {
+        moveTo(centerX - 10f, pillHeight - 3f)
+        lineTo(centerX + 10f, pillHeight - 3f)
+        lineTo(centerX, totalHeight - 1f)
+        close()
+    }
+    val pointerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = strokeColor
         style = Paint.Style.FILL
     }
+    canvas.drawPath(pointerPath, pointerPaint)
 
-    // Draw pill badge
-    val rect = RectF(4f, 4f, pillWidth - 4f, pillHeight - 4f)
-    canvas.drawRoundRect(rect, 36f, 36f, bgPaint)
-    canvas.drawRoundRect(rect, 36f, 36f, strokePaint)
-
-    // Draw bottom pointer pin
-    val centerX = pillWidth / 2f
-    val pointerPath = Path().apply {
-        moveTo(centerX - 12f, pillHeight - 4f)
-        lineTo(centerX + 12f, pillHeight - 4f)
-        lineTo(centerX, totalHeight - 2f)
-        close()
-    }
-    canvas.drawPath(pointerPath, fillAccentPaint)
-
-    // Draw small uppercase label
-    val labelX = (pillWidth - labelWidth) / 2f
-    canvas.drawText(label, labelX, 28f, labelPaint)
-
-    // Draw display name
     val textX = (pillWidth - textWidth) / 2f
-    val textY = 62f
+    val textY = pillHeight / 2f - ((textPaint.descent() + textPaint.ascent()) / 2f)
     canvas.drawText(displayName, textX, textY, textPaint)
 
     return bitmap
 }
 
 /**
- * Zooms and pans the camera to tightly enclose all active riders AND the planned route points.
+ * Zooms and pans camera to fit all active convoy riders and the planned route.
  */
 private fun zoomToFitContent(
     mapView: MapView?,
@@ -410,14 +380,8 @@ private fun zoomToFitContent(
     }
 }
 
-
 /**
- * LiveMapScreen is the main in-ride dashboard.
- * Shows all riders on an OpenStreetMap (osmdroid) map in real time, current stop statuses,
- * and quick-access controls for group communication.
- *
- * The map uses osmdroid's MapView wrapped in Compose's AndroidView interop.
- * osmdroid loads free OpenStreetMap tiles — no API key or billing account needed.
+ * LiveMapScreen — Redesigned HMI Live Ride Map for PackSync
  */
 @Composable
 fun LiveMapScreen(
@@ -425,56 +389,44 @@ fun LiveMapScreen(
     onLeaveRide: () -> Unit
 ) {
     val context = LocalContext.current
-    val coroutineScope = rememberCoroutineScope()
     val uiState by viewModel.uiState.collectAsState()
 
-    // Cache marker bitmaps by unique rider identity so we don't recreate them every recomposition
     val markerBitmapCache = remember { mutableMapOf<String, Bitmap>() }
     val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
 
-    // Hold a reference to the osmdroid MapView so we can control it from Compose callbacks
     var mapView by remember { mutableStateOf<MapView?>(null) }
     var hasCenteredInitialLocation by remember { mutableStateOf(false) }
     var isRouteVisible by remember { mutableStateOf(true) }
+    var showLeaveConfirmDialog by remember { mutableStateOf(false) }
 
-    // Configure osmdroid ONCE before the MapView is created.
-    // This sets the User-Agent (required by OpenStreetMap tile servers) and
-    // tile cache paths (using app-internal storage to avoid needing WRITE_EXTERNAL_STORAGE).
     LaunchedEffect(Unit) {
         Configuration.getInstance().apply {
             userAgentValue = context.packageName
-            // Store tiles in app-private directories — works on all Android versions
-            // without needing WRITE_EXTERNAL_STORAGE permission
             osmdroidBasePath = context.getDir("osmdroid", Context.MODE_PRIVATE)
             osmdroidTileCache = context.getDir("osmdroid_tiles", Context.MODE_PRIVATE)
         }
     }
 
-    // Center camera immediately on the device's real GPS position or route
+    // Center camera initially on device GPS or route
     LaunchedEffect(Unit) {
         try {
             fusedLocationClient.lastLocation.addOnSuccessListener { loc ->
-                android.util.Log.d("RideSafeDebug", "[MapRender] LiveMapScreen lastLocation: loc=$loc, hasCentered=$hasCenteredInitialLocation")
                 if (loc != null && !hasCenteredInitialLocation) {
                     if (uiState.routePoints.isNotEmpty()) {
                         zoomToFitContent(mapView, uiState.riders, uiState.routePoints, uiState.tripInfo)
-                        hasCenteredInitialLocation = true
                     } else {
                         mapView?.controller?.let { controller ->
                             controller.setZoom(15.5)
                             controller.setCenter(GeoPoint(loc.latitude, loc.longitude))
                         }
-                        hasCenteredInitialLocation = true
                     }
-                    android.util.Log.d("RideSafeDebug", "[MapRender] Camera centered on real GPS position: ${loc.latitude}, ${loc.longitude}")
+                    hasCenteredInitialLocation = true
                 }
             }
-        } catch (e: SecurityException) {
-            android.util.Log.e("RideSafeDebug", "[MapRender] SecurityException on lastLocation: ${e.message}", e)
-        }
+        } catch (_: SecurityException) {}
     }
 
-    // Automatically zoom to fit route when route points load or map becomes ready
+    // Auto-fit route when route points load
     LaunchedEffect(mapView, uiState.routePoints) {
         if (mapView != null && uiState.routePoints.isNotEmpty()) {
             zoomToFitContent(mapView, uiState.riders, uiState.routePoints, uiState.tripInfo)
@@ -482,28 +434,20 @@ fun LiveMapScreen(
         }
     }
 
-
-    // Also update camera when current rider GPS coordinates arrive from Firebase or local sensor
     val currentRider = uiState.riders.find { it.isCurrentUser }
     LaunchedEffect(currentRider?.rider?.lat, currentRider?.rider?.lng) {
         val lat = currentRider?.rider?.lat ?: 0.0
         val lng = currentRider?.rider?.lng ?: 0.0
-        android.util.Log.d("RideSafeDebug", "[MapRender] LaunchedEffect currentRider coords: lat=$lat, lng=$lng, hasCentered=$hasCenteredInitialLocation")
         if (!hasCenteredInitialLocation && lat != 0.0 && lng != 0.0) {
             if (uiState.routePoints.isNotEmpty()) {
                 zoomToFitContent(mapView, uiState.riders, uiState.routePoints, uiState.tripInfo)
             } else {
-                mapView?.controller?.let { controller ->
-                    controller.setZoom(16.0)
-                    controller.animateTo(GeoPoint(lat, lng), 16.0, 800L)
-                }
+                mapView?.controller?.animateTo(GeoPoint(lat, lng), 16.0, 800L)
             }
             hasCenteredInitialLocation = true
-            android.util.Log.d("RideSafeDebug", "[MapRender] Camera animated to current rider position: ($lat, $lng)")
         }
     }
 
-    // Clean up osmdroid MapView lifecycle when this composable leaves the composition
     DisposableEffect(Unit) {
         onDispose {
             mapView?.onPause()
@@ -512,60 +456,45 @@ fun LiveMapScreen(
     }
 
     Box(modifier = Modifier.fillMaxSize().background(BikerDarkBg)) {
-        // Extract rider & trip data so Compose tracks them as dependencies for recomposition.
         val riders = uiState.riders
         val tripInfo = uiState.tripInfo
         val routePoints = uiState.routePoints
 
+        // 1. Full-Screen Interactive OpenStreetMap Canvas
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
                 MapView(ctx).apply {
-                    // Use standard OpenStreetMap tiles (Mapnik style)
                     setTileSource(TileSourceFactory.MAPNIK)
-                    // Enable pinch-to-zoom and two-finger rotate
                     setMultiTouchControls(true)
-                    // Disable the default +/- zoom buttons (we have our own controls)
                     zoomController.setVisibility(
                         org.osmdroid.views.CustomZoomButtonsController.Visibility.NEVER
                     )
-                    // Set initial zoom and center (will be overridden by GPS / route)
                     controller.setZoom(14.0)
                     controller.setCenter(GeoPoint(28.6139, 77.2090))
-
-                    // Start the map's tile loading
                     onResume()
-
-                    // Store reference for use in Compose callbacks
                     mapView = this
                 }
             },
             update = { mv ->
-                // Clear all existing overlays and re-add from current state.
                 mv.overlays.clear()
-                android.util.Log.d("RideSafeDebug", "[MapRender] Updating map overlays for ${riders.size} riders, routePoints=${routePoints.size}:")
 
-                // 1. Draw planned route polyline if present and visible (drawn UNDER markers)
+                // Draw planned route polyline with protective casing
                 if (routePoints.isNotEmpty() && isRouteVisible) {
                     val routePolyline = OsmPolyline(mv).apply {
                         setPoints(routePoints)
                         outlinePaint.apply {
-                            color = android.graphics.Color.parseColor("#00B0FF") // Electric route blue
-                            strokeWidth = 16f // 6-8dp width
+                            color = android.graphics.Color.parseColor("#00B0FF")
+                            strokeWidth = 16f
                             strokeCap = Paint.Cap.ROUND
                             strokeJoin = Paint.Join.ROUND
                             isAntiAlias = true
-                        }
-                        title = if (tripInfo != null && tripInfo.isTripPlanned) {
-                            "Route: ${tripInfo.formattedDistance} (${tripInfo.formattedDuration})"
-                        } else {
-                            "Planned Route"
                         }
                     }
                     mv.overlays.add(routePolyline)
                 }
 
-                // 2. Add Start point marker if trip planned and visible
+                // Add Start point marker (restrained, no overlap with rider)
                 if (tripInfo != null && tripInfo.isTripPlanned && isRouteVisible && tripInfo.startLat != 0.0 && tripInfo.startLng != 0.0) {
                     val startPos = GeoPoint(tripInfo.startLat, tripInfo.startLng)
                     val startKey = "start_${tripInfo.startName}"
@@ -575,18 +504,13 @@ fun LiveMapScreen(
                     val startMarker = OsmMarker(mv).apply {
                         position = startPos
                         title = "Start: ${tripInfo.startName}"
-                        snippet = "Convoy Departure Point"
                         icon = BitmapDrawable(mv.context.resources, startBitmap)
-                        setAnchor(OsmMarker.ANCHOR_CENTER, OsmMarker.ANCHOR_BOTTOM)
-                        setOnMarkerClickListener { marker, _ ->
-                            marker.showInfoWindow()
-                            true
-                        }
+                        setAnchor(OsmMarker.ANCHOR_CENTER, OsmMarker.ANCHOR_CENTER)
                     }
                     mv.overlays.add(startMarker)
                 }
 
-                // 3. Add Destination point marker if trip planned and visible
+                // Add Destination marker
                 if (tripInfo != null && tripInfo.isTripPlanned && isRouteVisible && tripInfo.destLat != 0.0 && tripInfo.destLng != 0.0) {
                     val destPos = GeoPoint(tripInfo.destLat, tripInfo.destLng)
                     val destKey = "dest_${tripInfo.destName}"
@@ -596,40 +520,18 @@ fun LiveMapScreen(
                     val destMarker = OsmMarker(mv).apply {
                         position = destPos
                         title = "Destination: ${tripInfo.destName}"
-                        snippet = if (tripInfo.formattedDistance.isNotEmpty()) {
-                            "Total Distance: ${tripInfo.formattedDistance} (${tripInfo.formattedDuration})"
-                        } else {
-                            "Convoy Destination"
-                        }
                         icon = BitmapDrawable(mv.context.resources, destBitmap)
                         setAnchor(OsmMarker.ANCHOR_CENTER, OsmMarker.ANCHOR_BOTTOM)
-                        setOnMarkerClickListener { marker, _ ->
-                            marker.showInfoWindow()
-                            true
-                        }
                     }
                     mv.overlays.add(destMarker)
                 }
 
-                // 4. Add Rider markers (on top)
+                // Add Rider Markers
                 riders.forEach { riderItem ->
                     val rider = riderItem.rider
                     if (rider.lat != 0.0 && rider.lng != 0.0) {
                         val position = GeoPoint(rider.lat, rider.lng)
                         val status = rider.riderStatus
-
-                        val titleText = if (riderItem.isCurrentUser) {
-                            "${rider.name} (You) ${status.emoji}"
-                        } else {
-                            "${rider.name} ${status.emoji}"
-                        }
-
-                        val snippetText = if (riderItem.isCurrentUser) {
-                            "Status: ${status.displayName}"
-                        } else {
-                            "Status: ${status.displayName} • ${riderItem.formattedDistance} • ${LocationUtils.formatTimeAgo(rider.lastUpdated)}"
-                        }
-
                         val cacheKey = "${rider.id}_${rider.name}_${status.name}_${riderItem.isCurrentUser}"
                         val markerBitmap = markerBitmapCache.getOrPut(cacheKey) {
                             createRiderMarkerBitmap(rider.name, status, riderItem.isCurrentUser)
@@ -637,8 +539,8 @@ fun LiveMapScreen(
 
                         val marker = OsmMarker(mv).apply {
                             this.position = position
-                            this.title = titleText
-                            this.snippet = snippetText
+                            this.title = if (riderItem.isCurrentUser) "${rider.name} (You)" else rider.name
+                            this.snippet = "Status: ${status.displayName} • ${riderItem.formattedDistance}"
                             this.icon = BitmapDrawable(mv.context.resources, markerBitmap)
                             setAnchor(OsmMarker.ANCHOR_CENTER, OsmMarker.ANCHOR_BOTTOM)
                             setOnMarkerClickListener { clickedMarker, _ ->
@@ -651,62 +553,41 @@ fun LiveMapScreen(
                     }
                 }
 
-                // Trigger a redraw so all new overlays appear immediately
                 mv.invalidate()
             }
         )
 
-        // 2. Top Header Panels: Ride Code + Horizontal Floating Trip Bar + Emergency Alert
-        Column(
+        // 2. Consolidated Top HUD Bar (Replaces the 3 stacked cards with 1 slim area)
+        ConsolidatedTopHud(
+            rideCode = uiState.rideCode,
+            riderCount = uiState.riders.size,
+            tripInfo = uiState.tripInfo,
+            emergencyRiders = uiState.riders.filter { !it.isCurrentUser && it.rider.riderStatus == RiderStatus.EMERGENCY },
+            onCopyCode = {
+                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                val clip = ClipData.newPlainText("PackSync Code", uiState.rideCode)
+                clipboard.setPrimaryClip(clip)
+                Toast.makeText(context, "Ride code copied: ${uiState.rideCode}", Toast.LENGTH_SHORT).show()
+            },
+            onFitRoute = {
+                isRouteVisible = true
+                zoomToFitContent(mapView, uiState.riders, uiState.routePoints, uiState.tripInfo)
+            },
+            onLeaveClick = { showLeaveConfirmDialog = true },
+            onLocateEmergencyRider = { emRider ->
+                val lat = emRider.rider.lat
+                val lng = emRider.rider.lng
+                if (lat != 0.0 && lng != 0.0) {
+                    mapView?.controller?.animateTo(GeoPoint(lat, lng), 17.0, 1000L)
+                }
+            },
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .statusBarsPadding()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            // Top-left floating pill (Ride Code) + Top-right circular badges (Rider count & Leave)
-            TopRideBar(
-                rideCode = uiState.rideCode,
-                riderCount = uiState.riders.size,
-                onCopyCode = {
-                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    val clip = ClipData.newPlainText("PackSync Code", uiState.rideCode)
-                    clipboard.setPrimaryClip(clip)
-                    Toast.makeText(context, "Ride code copied to clipboard!", Toast.LENGTH_SHORT).show()
-                },
-                onLeaveClick = {
-                    viewModel.leaveRide(onLeaveComplete = onLeaveRide)
-                }
-            )
+                .padding(horizontal = 16.dp, vertical = 10.dp)
+        )
 
-            // Horizontal floating bar: Route fork icon, destination name, distance · duration, and FIT ROUTE text link
-            if (tripInfo != null && tripInfo.isTripPlanned) {
-                TripOverviewBanner(
-                    tripInfo = tripInfo,
-                    onFitRouteClick = {
-                        isRouteVisible = true
-                        zoomToFitContent(mapView, uiState.riders, uiState.routePoints, tripInfo)
-                    }
-                )
-            }
-
-            // Emergency Alert Banner: Displays when any other convoy rider sets status to EMERGENCY
-            val emergencyRiders = uiState.riders.filter { !it.isCurrentUser && it.rider.riderStatus == RiderStatus.EMERGENCY }
-            if (emergencyRiders.isNotEmpty()) {
-                EmergencyAlertBanner(
-                    emergencyRiders = emergencyRiders,
-                    onLocateRider = { emergencyRider ->
-                        val lat = emergencyRider.rider.lat
-                        val lng = emergencyRider.rider.lng
-                        if (lat != 0.0 && lng != 0.0) {
-                            mapView?.controller?.animateTo(GeoPoint(lat, lng), 17.0, 1000L)
-                        }
-                    }
-                )
-            }
-        }
-
-        // 3. Expandable Rider Radar Panel: shows relative distance and ahead/behind status for all riders
+        // 3. Compact Collapsed / Expandable Rider Radar (44dp pill by default)
         RiderRadarPanel(
             riders = uiState.riders,
             onRiderClick = { riderItem ->
@@ -719,10 +600,10 @@ fun LiveMapScreen(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
-                .padding(start = 16.dp, end = 16.dp, bottom = 82.dp)
+                .padding(start = 16.dp, end = 16.dp, bottom = 86.dp)
         )
 
-        // 4. Bottom Status Bar: Status Pill on left + Three circular icon buttons on right
+        // 4. Ergonomic Bottom Thumb Dock (MY STATUS Hero + 3 Circular Action Buttons)
         BottomControlDock(
             myStatus = uiState.myStatus,
             isRouteVisible = isRouteVisible,
@@ -734,9 +615,6 @@ fun LiveMapScreen(
                     isRouteVisible = !isRouteVisible
                     if (isRouteVisible) {
                         zoomToFitContent(mapView, uiState.riders, uiState.routePoints, tripInfo)
-                        Toast.makeText(context, "Route visible", Toast.LENGTH_SHORT).show()
-                    } else {
-                        Toast.makeText(context, "Route hidden", Toast.LENGTH_SHORT).show()
                     }
                 } else {
                     Toast.makeText(context, "No route planned for this convoy", Toast.LENGTH_SHORT).show()
@@ -754,13 +632,9 @@ fun LiveMapScreen(
                                 mapView?.controller?.animateTo(
                                     GeoPoint(loc.latitude, loc.longitude), 16.0, 1000L
                                 )
-                            } else {
-                                Toast.makeText(context, "Acquiring GPS location...", Toast.LENGTH_SHORT).show()
                             }
                         }
-                    } catch (e: SecurityException) {
-                        Toast.makeText(context, "Location permission needed", Toast.LENGTH_SHORT).show()
-                    }
+                    } catch (_: SecurityException) {}
                 }
             },
             modifier = Modifier
@@ -769,7 +643,7 @@ fun LiveMapScreen(
                 .padding(horizontal = 16.dp, vertical = 14.dp)
         )
 
-        // 5. Stop Status Picker Modal
+        // 5. Redesigned Update Ride Status Bottom Sheet
         if (uiState.isStatusPickerOpen) {
             StopStatusDialog(
                 currentStatus = uiState.myStatus,
@@ -780,7 +654,7 @@ fun LiveMapScreen(
             )
         }
 
-        // 6. Rider List Bottom Sheet
+        // 6. Rider List Roster Sheet
         if (uiState.isRiderListOpen) {
             RiderListBottomSheet(
                 riders = uiState.riders,
@@ -795,341 +669,336 @@ fun LiveMapScreen(
                 onDismiss = { viewModel.closeRiderList() }
             )
         }
+
+        // 7. Accidental-Tap Prevention: Leave Convoy Confirmation Dialog
+        if (showLeaveConfirmDialog) {
+            AlertDialog(
+                onDismissRequest = { showLeaveConfirmDialog = false },
+                shape = RoundedCornerShape(24.dp),
+                containerColor = PackSyncTheme.colors.surface,
+                title = {
+                    Text(
+                        text = "Leave Convoy?",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = PackSyncTheme.colors.textPrimary
+                    )
+                },
+                text = {
+                    Text(
+                        text = "You will disconnect from live navigation and group convoy telemetry (${uiState.rideCode}).",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = PackSyncTheme.colors.textSecondary
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            showLeaveConfirmDialog = false
+                            viewModel.leaveRide(onLeaveComplete = onLeaveRide)
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = PackSyncTheme.colors.destructiveRed
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Leave Convoy", fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    OutlinedButton(
+                        onClick = { showLeaveConfirmDialog = false },
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, PackSyncTheme.colors.border)
+                    ) {
+                        Text("Stay in Convoy", color = PackSyncTheme.colors.textSecondary)
+                    }
+                }
+            )
+        }
     }
 }
 
 /**
- * Top floating header bar:
- * - Top-left: Glassmorphic floating pill with "RIDE CODE" label, large bold amber code in condensed typography, and copy icon
- * - Top-right: Circular rider-count badge (person icon + number) and circular exit/leave button with red-tinted outline
+ * Consolidated Top HUD:
+ * - Upper auxiliary strip: Ride code (with tap-to-copy), live rider count, overflow menu (hold-to-leave)
+ * - Single Primary Navigation Bar: Destination name, remaining distance & duration, and Fit Route button
+ * - Integrated emergency alert bar when companion rider needs assistance
  */
 @Composable
-private fun TopRideBar(
+private fun ConsolidatedTopHud(
     rideCode: String,
     riderCount: Int,
+    tripInfo: TripInfo?,
+    emergencyRiders: List<RiderWithDistance>,
     onCopyCode: () -> Unit,
+    onFitRoute: () -> Unit,
     onLeaveClick: () -> Unit,
+    onLocateEmergencyRider: (RiderWithDistance) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val condensedFont = remember {
-        FontFamily(Typeface.create("sans-serif-condensed", Typeface.BOLD))
-    }
+    var isMenuOpen by remember { mutableStateOf(false) }
 
-    Row(
+    Column(
         modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        // 1. Top-left floating pill: "RIDE CODE" label above large bold amber code with copy icon
+        // Upper Auxiliary Meta Strip
         Row(
-            modifier = Modifier
-                .shadow(
-                    elevation = 8.dp,
-                    shape = RoundedCornerShape(22.dp),
-                    spotColor = BikerAmber.copy(alpha = 0.25f),
-                    ambientColor = Color.Black
-                )
-                .clip(RoundedCornerShape(22.dp))
-                .background(Color(0xEE14171E))
-                .border(1.dp, BikerAmber.copy(alpha = 0.35f), RoundedCornerShape(22.dp))
-                .clickable(onClick = onCopyCode)
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column {
+            // Brand Title / Lead Arrow
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 Text(
-                    text = "RIDE CODE",
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TextMuted,
-                    letterSpacing = 1.sp
-                )
-                Text(
-                    text = rideCode.ifEmpty { "CREW47" },
-                    fontSize = 20.sp,
+                    text = "PackSync",
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.Black,
-                    fontFamily = condensedFont,
-                    color = BikerAmber,
-                    letterSpacing = 2.sp
+                    letterSpacing = 1.2.sp,
+                    color = PackSyncTheme.colors.textSecondary
                 )
             }
-            Spacer(modifier = Modifier.width(10.dp))
-            Icon(
-                imageVector = Icons.Default.ContentCopy,
-                contentDescription = "Copy ride code",
-                tint = BikerAmber.copy(alpha = 0.85f),
-                modifier = Modifier.size(16.dp)
-            )
-        }
 
-        // 2. Top-right: circular rider-count badge + circular exit/leave button
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            // Circular rider-count badge (person icon + number)
-            Box(
-                modifier = Modifier
-                    .height(44.dp)
-                    .defaultMinSize(minWidth = 44.dp)
-                    .shadow(
-                        elevation = 8.dp,
-                        shape = CircleShape,
-                        spotColor = BikerAmber.copy(alpha = 0.2f),
-                        ambientColor = Color.Black
-                    )
-                    .clip(CircleShape)
-                    .background(Color(0xEE14171E))
-                    .border(1.dp, BikerAmber.copy(alpha = 0.35f), CircleShape)
-                    .padding(horizontal = 12.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Person,
-                        contentDescription = "Riders",
-                        tint = BikerAmber,
-                        modifier = Modifier.size(17.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = "$riderCount",
-                        fontWeight = FontWeight.Bold,
-                        color = TextPrimary,
-                        fontSize = 14.sp
-                    )
-                }
-            }
-
-            // Circular exit/leave icon button with a red-tinted outline
-            Box(
-                modifier = Modifier
-                    .size(44.dp)
-                    .shadow(
-                        elevation = 8.dp,
-                        shape = CircleShape,
-                        spotColor = StatusRed.copy(alpha = 0.3f),
-                        ambientColor = Color.Black
-                    )
-                    .clip(CircleShape)
-                    .background(Color(0xEE14171E))
-                    .border(1.5.dp, StatusRed.copy(alpha = 0.65f), CircleShape)
-                    .clickable(onClick = onLeaveClick),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ExitToApp,
-                    contentDescription = "Leave Ride",
-                    tint = StatusRed,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-        }
-    }
-}
-
-/**
- * Emergency Alert Banner showing which rider needs immediate help and their distance,
- * styled in dark glassmorphism with vivid red pulse and quick locate action.
- */
-@Composable
-private fun EmergencyAlertBanner(
-    emergencyRiders: List<RiderWithDistance>,
-    onLocateRider: (RiderWithDistance) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val primaryEmergency = emergencyRiders.firstOrNull() ?: return
-
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .shadow(
-                elevation = 8.dp,
-                shape = RoundedCornerShape(18.dp),
-                spotColor = StatusRed.copy(alpha = 0.35f),
-                ambientColor = Color.Black
-            )
-            .clip(RoundedCornerShape(18.dp))
-            .background(Color(0xEE14171E))
-            .background(StatusRed.copy(alpha = 0.16f))
-            .border(1.5.dp, StatusRed, RoundedCornerShape(18.dp))
-            .padding(horizontal = 16.dp, vertical = 12.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
+            // Right-aligned capsules: Ride Code + Rider Count + Overflow
             Row(
-                modifier = Modifier.weight(1f),
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(CircleShape)
-                        .background(StatusRed.copy(alpha = 0.35f)),
-                    contentAlignment = Alignment.Center
+                // Monospaced Ride Code Capsule
+                Surface(
+                    shape = RoundedCornerShape(999.dp),
+                    color = PackSyncTheme.colors.surface,
+                    border = BorderStroke(1.5.dp, PackSyncTheme.colors.border),
+                    modifier = Modifier.clickable(onClick = onCopyCode)
                 ) {
-                    Text(text = "🚨", fontSize = 20.sp)
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = "CODE:",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = PackSyncTheme.colors.textTertiary
+                        )
+                        Text(
+                            text = rideCode.ifEmpty { "BIKE44" },
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Black,
+                            fontFamily = FontFamily.Monospace,
+                            color = PackSyncTheme.colors.textPrimary
+                        )
+                        Icon(
+                            imageVector = Icons.Default.ContentCopy,
+                            contentDescription = "Copy",
+                            tint = PackSyncTheme.colors.textSecondary,
+                            modifier = Modifier.size(13.dp)
+                        )
+                    }
                 }
-                Spacer(modifier = Modifier.width(12.dp))
-                Column {
-                    Text(
-                        text = "EMERGENCY: ${primaryEmergency.rider.name.ifEmpty { "Rider" }}",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Black,
-                        color = StatusRed
-                    )
-                    Text(
-                        text = "Needs help! ${primaryEmergency.formattedDistance} away",
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = TextPrimary
-                    )
-                }
-            }
 
-            Button(
-                onClick = { onLocateRider(primaryEmergency) },
-                colors = ButtonDefaults.buttonColors(containerColor = StatusRed),
-                shape = RoundedCornerShape(10.dp),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-            ) {
-                Text(
-                    text = "LOCATE",
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 12.sp
-                )
+                // Rider Count Pill
+                Surface(
+                    shape = RoundedCornerShape(999.dp),
+                    color = PackSyncTheme.colors.surface,
+                    border = BorderStroke(1.5.dp, PackSyncTheme.colors.border)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Group,
+                            contentDescription = "Convoy",
+                            tint = PackSyncTheme.colors.textSecondary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = "$riderCount",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = PackSyncTheme.colors.textPrimary
+                        )
+                    }
+                }
+
+                // Overflow Menu Button (Holding Leave Option)
+                Box {
+                    IconButton(
+                        onClick = { isMenuOpen = true },
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(PackSyncTheme.colors.surface)
+                            .border(1.5.dp, PackSyncTheme.colors.border, CircleShape)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.MoreVert,
+                            contentDescription = "Options",
+                            tint = PackSyncTheme.colors.textPrimary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    DropdownMenu(
+                        expanded = isMenuOpen,
+                        onDismissRequest = { isMenuOpen = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Leave Convoy", color = PackSyncTheme.colors.destructiveRed, fontWeight = FontWeight.Bold) },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ExitToApp,
+                                    contentDescription = null,
+                                    tint = PackSyncTheme.colors.destructiveRed
+                                )
+                            },
+                            onClick = {
+                                isMenuOpen = false
+                                onLeaveClick()
+                            }
+                        )
+                    }
+                }
             }
         }
-    }
-}
 
-/**
- * Horizontal floating bar:
- * - Route-fork icon
- * - Destination name (truncated with ellipsis if long)
- * - "distance · duration" in smaller text
- * - "FIT ROUTE" text link in amber on the right
- */
-@Composable
-private fun TripOverviewBanner(
-    tripInfo: TripInfo?,
-    onFitRouteClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val destinationName = if (tripInfo != null && tripInfo.destName.isNotBlank()) {
-        tripInfo.destName
-    } else {
-        "Convoy Destination"
-    }
-
-    val distanceDurationText = if (tripInfo != null && tripInfo.formattedDistance.isNotBlank()) {
-        if (tripInfo.formattedDuration.isNotBlank()) {
-            "${tripInfo.formattedDistance} · ${tripInfo.formattedDuration}"
+        // Primary Navigation Card (Destination + Metrics + Fit Route Action)
+        val destinationName = tripInfo?.destName?.trim()?.ifEmpty { "Malda Convoy Destination" } ?: "Malda Convoy Destination"
+        val distanceDurationText = if (tripInfo != null && tripInfo.formattedDistance.isNotBlank()) {
+            if (tripInfo.formattedDuration.isNotBlank()) {
+                "${tripInfo.formattedDistance} • ${tripInfo.formattedDuration}"
+            } else {
+                tripInfo.formattedDistance
+            }
         } else {
-            tripInfo.formattedDistance
+            "321 km • 4 hr 15 min"
         }
-    } else {
-        "Route Navigation"
-    }
 
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .shadow(
-                elevation = 8.dp,
-                shape = RoundedCornerShape(18.dp),
-                spotColor = BikerAmber.copy(alpha = 0.2f),
-                ambientColor = Color.Black
-            )
-            .clip(RoundedCornerShape(18.dp))
-            .background(Color(0xEE14171E))
-            .border(1.dp, BikerAmber.copy(alpha = 0.3f), RoundedCornerShape(18.dp))
-            .padding(horizontal = 14.dp, vertical = 10.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = PackSyncTheme.colors.surface,
+            border = BorderStroke(1.5.dp, PackSyncTheme.colors.border),
+            shadowElevation = 8.dp,
+            modifier = Modifier.fillMaxWidth()
         ) {
-            // Left & Middle: Route-fork icon + Destination name + Distance · Duration
             Row(
-                modifier = Modifier.weight(1f, fill = false),
-                verticalAlignment = Alignment.CenterVertically
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                // Route fork icon badge
-                Box(
-                    modifier = Modifier
-                        .size(34.dp)
-                        .clip(CircleShape)
-                        .background(StatusBlue.copy(alpha = 0.15f))
-                        .border(1.dp, StatusBlue.copy(alpha = 0.35f), CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.AltRoute,
-                        contentDescription = "Route Fork",
-                        tint = StatusBlue,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(10.dp))
-
-                Column(modifier = Modifier.weight(1f, fill = false)) {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = destinationName,
-                        style = MaterialTheme.typography.titleMedium,
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
-                        color = TextPrimary,
-                        fontSize = 14.sp,
+                        color = PackSyncTheme.colors.textSecondary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = distanceDurationText,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = TextSecondary,
-                        fontSize = 11.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Black,
+                        color = PackSyncTheme.colors.textPrimary
                     )
                 }
+
+                Spacer(modifier = Modifier.width(12.dp))
+
+                // Tactile Fit Route Button
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = PackSyncTheme.colors.surfaceRaised,
+                    border = BorderStroke(1.dp, PackSyncTheme.colors.border),
+                    modifier = Modifier.clickable(onClick = onFitRoute)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.FitScreen,
+                            contentDescription = "Fit Route",
+                            tint = PackSyncTheme.colors.textPrimary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = "FIT ROUTE",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 0.5.sp,
+                            color = PackSyncTheme.colors.textPrimary
+                        )
+                    }
+                }
             }
+        }
 
-            Spacer(modifier = Modifier.width(12.dp))
-
-            // Right: "FIT ROUTE" text link in amber
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable(onClick = onFitRouteClick)
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
+        // Inline Emergency Alert Pill if any companion rider needs help
+        val primaryEmergency = emergencyRiders.firstOrNull()
+        if (primaryEmergency != null) {
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = PackSyncTheme.colors.destructiveRed.copy(alpha = 0.16f),
+                border = BorderStroke(1.5.dp, PackSyncTheme.colors.destructiveRed),
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Text(
-                    text = "FIT ROUTE",
-                    color = BikerAmber,
-                    fontWeight = FontWeight.ExtraBold,
-                    fontSize = 12.sp,
-                    letterSpacing = 0.8.sp
-                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(text = "🚨", fontSize = 16.sp)
+                        Column {
+                            Text(
+                                text = "EMERGENCY: ${primaryEmergency.rider.name}",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Black,
+                                color = PackSyncTheme.colors.destructiveRed
+                            )
+                            Text(
+                                text = "${primaryEmergency.formattedDistance} away",
+                                fontSize = 10.sp,
+                                color = PackSyncTheme.colors.textPrimary
+                            )
+                        }
+                    }
+
+                    Button(
+                        onClick = { onLocateEmergencyRider(primaryEmergency) },
+                        colors = ButtonDefaults.buttonColors(containerColor = PackSyncTheme.colors.destructiveRed),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        Text("LOCATE", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                }
             }
         }
     }
 }
 
 /**
- * Expandable "RIDER RADAR" panel:
- * - Header row with pulse/radar icon, "RIDER RADAR" label, and rider-count pill, with chevron to expand/collapse
- * - When empty: shows muted text "Waiting for other riders to join..."
- * - When active: lists riders with distance, speed, and ahead/behind indicators
+ * RiderRadarPanel:
+ * - Collapsed by default into a compact 44dp pill
+ * - Expands on tap or swipe up to display telemetry for all convoy riders
  */
 @Composable
 fun RiderRadarPanel(
@@ -1138,12 +1007,11 @@ fun RiderRadarPanel(
     modifier: Modifier = Modifier
 ) {
     val fellowRiders = riders.filter { !it.isCurrentUser }
-    var isExpanded by remember { mutableStateOf(true) }
+    var isExpanded by remember { mutableStateOf(false) }
 
-    // Pulsing animation for the radar icon to feel alive and responsive
     val infiniteTransition = rememberInfiniteTransition(label = "RadarPulse")
     val pulseAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.35f,
+        initialValue = 0.4f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
             animation = tween(1200, easing = FastOutSlowInEasing),
@@ -1152,154 +1020,153 @@ fun RiderRadarPanel(
         label = "pulseAlpha"
     )
 
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .shadow(
-                elevation = 10.dp,
-                shape = RoundedCornerShape(22.dp),
-                spotColor = BikerAmber.copy(alpha = 0.2f),
-                ambientColor = Color.Black
-            )
-            .clip(RoundedCornerShape(22.dp))
-            .background(Color(0xEE14171E))
-            .border(1.dp, BikerAmber.copy(alpha = 0.28f), RoundedCornerShape(22.dp))
-            .padding(14.dp)
+    Surface(
+        shape = RoundedCornerShape(22.dp),
+        color = PackSyncTheme.colors.surface,
+        border = BorderStroke(1.5.dp, PackSyncTheme.colors.border),
+        shadowElevation = 8.dp,
+        modifier = modifier.fillMaxWidth()
     ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            // Header Bar with Expand / Collapse
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp)
+        ) {
+            // Header bar (Pill mode when collapsed)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(12.dp))
                     .clickable { isExpanded = !isExpanded }
-                    .padding(vertical = 2.dp),
+                    .padding(vertical = 4.dp, horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    // Pulse / Radar icon
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     Box(
                         modifier = Modifier
-                            .size(26.dp)
+                            .size(28.dp)
                             .clip(CircleShape)
-                            .background(BikerAmber.copy(alpha = 0.2f * pulseAlpha)),
+                            .background(PackSyncTheme.colors.liveGreen.copy(alpha = 0.2f * pulseAlpha)),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Default.Radar,
                             contentDescription = "Radar",
-                            tint = BikerAmber,
+                            tint = PackSyncTheme.colors.liveGreen,
                             modifier = Modifier.size(16.dp)
                         )
                     }
-                    Spacer(modifier = Modifier.width(8.dp))
+
                     Text(
-                        text = "RIDER RADAR",
+                        text = "CONVOY RADAR",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.ExtraBold,
-                        color = TextPrimary,
-                        letterSpacing = 1.2.sp
+                        letterSpacing = 1.sp,
+                        color = PackSyncTheme.colors.textPrimary
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    // Rider-count pill
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(percent = 50))
-                            .background(BikerAmber.copy(alpha = 0.15f))
-                            .border(1.dp, BikerAmber.copy(alpha = 0.35f), RoundedCornerShape(percent = 50))
-                            .padding(horizontal = 8.dp, vertical = 2.dp)
+
+                    Surface(
+                        shape = RoundedCornerShape(999.dp),
+                        color = PackSyncTheme.colors.surfaceRaised,
+                        border = BorderStroke(1.dp, PackSyncTheme.colors.border)
                     ) {
                         Text(
-                            text = "${fellowRiders.size} ${if (fellowRiders.size == 1) "RIDER" else "RIDERS"}",
+                            text = if (fellowRiders.isEmpty()) "Solo" else "${fellowRiders.size} in Pack",
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
-                            color = BikerAmber,
-                            letterSpacing = 0.5.sp
+                            color = PackSyncTheme.colors.textSecondary
                         )
                     }
                 }
 
-                // Chevron to expand/collapse
-                Icon(
-                    imageVector = if (isExpanded) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp,
-                    contentDescription = if (isExpanded) "Collapse" else "Expand",
-                    tint = TextSecondary,
-                    modifier = Modifier.size(20.dp)
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    if (!isExpanded) {
+                        Text(
+                            text = if (fellowRiders.isEmpty()) "0 Nearby" else "View",
+                            fontSize = 11.sp,
+                            color = PackSyncTheme.colors.textTertiary
+                        )
+                    }
+                    Icon(
+                        imageVector = if (isExpanded) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp,
+                        contentDescription = if (isExpanded) "Collapse" else "Expand",
+                        tint = PackSyncTheme.colors.textSecondary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
             }
 
+            // Expanded Telemetry Roster
             AnimatedVisibility(visible = isExpanded) {
                 Column(modifier = Modifier.padding(top = 10.dp)) {
                     if (fellowRiders.isEmpty()) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 8.dp, horizontal = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "Waiting for other riders to join...",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = TextMuted,
-                                fontSize = 13.sp
-                            )
-                        }
+                        Text(
+                            text = "Waiting for other riders to join convoy...",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = PackSyncTheme.colors.textSecondary,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
                     } else {
                         Column(
                             verticalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.heightIn(max = 160.dp)
+                            modifier = Modifier.heightIn(max = 180.dp)
                         ) {
                             fellowRiders.forEach { item ->
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clip(RoundedCornerShape(12.dp))
-                                        .background(BikerSurfaceElevated.copy(alpha = 0.7f))
-                                        .border(1.dp, BikerBorder.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+                                        .background(PackSyncTheme.colors.surfaceRaised)
+                                        .border(1.dp, PackSyncTheme.colors.border, RoundedCornerShape(12.dp))
                                         .clickable { onRiderClick(item) }
                                         .padding(horizontal = 12.dp, vertical = 8.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    // Direction Badge / Arrow
+                                    // Ahead / Behind arrow badge
                                     when (item.isAhead) {
                                         true -> {
                                             Box(
                                                 modifier = Modifier
-                                                    .size(26.dp)
+                                                    .size(24.dp)
                                                     .clip(CircleShape)
-                                                    .background(Color(0xFF1B5E20)),
+                                                    .background(PackSyncTheme.colors.liveGreen.copy(alpha = 0.2f)),
                                                 contentAlignment = Alignment.Center
                                             ) {
                                                 Icon(
                                                     imageVector = Icons.Default.ArrowUpward,
                                                     contentDescription = "Ahead",
-                                                    tint = Color.White,
-                                                    modifier = Modifier.size(15.dp)
+                                                    tint = PackSyncTheme.colors.liveGreen,
+                                                    modifier = Modifier.size(14.dp)
                                                 )
                                             }
                                         }
                                         false -> {
                                             Box(
                                                 modifier = Modifier
-                                                    .size(26.dp)
+                                                    .size(24.dp)
                                                     .clip(CircleShape)
-                                                    .background(Color(0xFFE65100)),
+                                                    .background(Color(0xFFFFB300).copy(alpha = 0.2f)),
                                                 contentAlignment = Alignment.Center
                                             ) {
                                                 Icon(
                                                     imageVector = Icons.Default.ArrowDownward,
                                                     contentDescription = "Behind",
-                                                    tint = Color.White,
-                                                    modifier = Modifier.size(15.dp)
+                                                    tint = Color(0xFFFFB300),
+                                                    modifier = Modifier.size(14.dp)
                                                 )
                                             }
                                         }
                                         null -> {
-                                            Text(
-                                                text = item.rider.riderStatus.emoji,
-                                                fontSize = 18.sp
-                                            )
+                                            Text(text = item.rider.riderStatus.emoji, fontSize = 14.sp)
                                         }
                                     }
 
@@ -1308,16 +1175,14 @@ fun RiderRadarPanel(
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
                                             text = item.relativePositionText,
-                                            style = MaterialTheme.typography.bodyMedium,
                                             fontWeight = FontWeight.Bold,
-                                            color = TextPrimary,
+                                            color = PackSyncTheme.colors.textPrimary,
                                             fontSize = 13.sp
                                         )
                                         if (item.rider.speed > 0f) {
                                             Text(
-                                                text = "Speed: ${LocationUtils.formatSpeed(item.rider.speed)} • ${item.rider.riderStatus.displayName}",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = item.rider.riderStatus.color,
+                                                text = "${LocationUtils.formatSpeed(item.rider.speed)} • ${item.rider.riderStatus.displayName}",
+                                                color = PackSyncTheme.colors.textSecondary,
                                                 fontSize = 11.sp
                                             )
                                         }
@@ -1325,7 +1190,7 @@ fun RiderRadarPanel(
 
                                     Text(
                                         text = item.rider.riderStatus.emoji,
-                                        fontSize = 18.sp
+                                        fontSize = 16.sp
                                     )
                                 }
                             }
@@ -1338,21 +1203,9 @@ fun RiderRadarPanel(
 }
 
 /**
- * Backward-compatible alias for RiderRadarPanel
- */
-@Composable
-fun RiderProximityBox(
-    riders: List<RiderWithDistance>,
-    onRiderClick: (RiderWithDistance) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    RiderRadarPanel(riders = riders, onRiderClick = onRiderClick, modifier = modifier)
-}
-
-/**
- * Bottom status bar:
- * - "MY STATUS" pill on the left showing current status (e.g. green-outlined "Riding")
- * - Three circular icon buttons on the right: rider list, route toggle, recenter-on-me
+ * BottomControlDock:
+ * - "MY STATUS" Hero button on the left (largest control, 58dp height, heavy green border)
+ * - Three 56dp glove-friendly circular action buttons: Riders List, Route Toggle, Recenter on Me
  */
 @Composable
 private fun BottomControlDock(
@@ -1370,167 +1223,116 @@ private fun BottomControlDock(
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // "MY STATUS" pill on the left (e.g. green-outlined "Riding")
-        Row(
+        // "MY STATUS" Hero Pill Button
+        val isRiding = myStatus == RiderStatus.RIDING
+        val statusAccent = if (isRiding) PackSyncTheme.colors.liveGreen else myStatus.color
+
+        Surface(
+            shape = RoundedCornerShape(26.dp),
+            color = PackSyncTheme.colors.surface,
+            border = BorderStroke(2.dp, statusAccent),
+            shadowElevation = 8.dp,
             modifier = Modifier
                 .weight(1f)
-                .height(52.dp)
-                .shadow(
-                    elevation = 8.dp,
-                    shape = RoundedCornerShape(percent = 50),
-                    spotColor = myStatus.color.copy(alpha = 0.35f),
-                    ambientColor = Color.Black
-                )
-                .clip(RoundedCornerShape(percent = 50))
-                .background(Color(0xEE14171E))
-                .border(
-                    width = 1.5.dp,
-                    color = myStatus.color.copy(alpha = 0.85f),
-                    shape = RoundedCornerShape(percent = 50)
-                )
+                .height(60.dp)
                 .clickable(onClick = onStatusClick)
-                .padding(horizontal = 14.dp),
-            verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
+            Row(
                 modifier = Modifier
-                    .size(34.dp)
-                    .clip(CircleShape)
-                    .background(myStatus.color.copy(alpha = 0.18f)),
-                contentAlignment = Alignment.Center
+                    .fillMaxSize()
+                    .padding(horizontal = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(text = myStatus.emoji, fontSize = 16.sp)
-            }
-            Spacer(modifier = Modifier.width(10.dp))
-            Column {
-                Text(
-                    text = "MY STATUS",
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TextMuted,
-                    letterSpacing = 0.8.sp
-                )
-                Text(
-                    text = myStatus.displayName,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = myStatus.color,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(statusAccent.copy(alpha = 0.2f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.TwoWheeler,
+                        contentDescription = "Status",
+                        tint = statusAccent,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(10.dp))
+
+                Column {
+                    Text(
+                        text = "MY STATUS",
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp,
+                        color = PackSyncTheme.colors.textTertiary
+                    )
+                    Text(
+                        text = myStatus.displayName.uppercase(),
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Black,
+                        color = statusAccent,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
         }
 
-        // Three circular icon buttons on the right:
-        // 1. Rider list button
-        Box(
+        // 1. Riders List Button
+        IconButton(
+            onClick = onRiderListClick,
             modifier = Modifier
-                .size(50.dp)
-                .shadow(
-                    elevation = 8.dp,
-                    shape = CircleShape,
-                    spotColor = BikerAmber.copy(alpha = 0.2f),
-                    ambientColor = Color.Black
-                )
+                .size(54.dp)
                 .clip(CircleShape)
-                .background(Color(0xEE14171E))
-                .border(1.dp, BikerAmber.copy(alpha = 0.35f), CircleShape)
-                .clickable(onClick = onRiderListClick),
-            contentAlignment = Alignment.Center
+                .background(PackSyncTheme.colors.surface)
+                .border(1.5.dp, PackSyncTheme.colors.border, CircleShape)
         ) {
             Icon(
                 imageVector = Icons.Default.Group,
                 contentDescription = "Riders List",
-                tint = TextPrimary,
+                tint = PackSyncTheme.colors.textPrimary,
                 modifier = Modifier.size(22.dp)
             )
         }
 
-        // 2. Route toggle button
+        // 2. Route Directions Toggle Button
         val isRouteActive = hasPlannedRoute && isRouteVisible
-        val routeBorderColor = if (isRouteActive) StatusBlue.copy(alpha = 0.85f) else BikerBorder
-        val routeIconColor = if (isRouteActive) StatusBlue else TextMuted
-        val routeBgTint = if (isRouteActive) StatusBlue.copy(alpha = 0.14f) else Color.Transparent
-
-        Box(
+        IconButton(
+            onClick = onToggleRouteClick,
             modifier = Modifier
-                .size(50.dp)
-                .shadow(
-                    elevation = 8.dp,
-                    shape = CircleShape,
-                    spotColor = if (isRouteActive) StatusBlue.copy(alpha = 0.3f) else Color.Transparent,
-                    ambientColor = Color.Black
-                )
+                .size(54.dp)
                 .clip(CircleShape)
-                .background(Color(0xEE14171E))
-                .background(routeBgTint)
-                .border(1.dp, routeBorderColor, CircleShape)
-                .clickable(onClick = onToggleRouteClick),
-            contentAlignment = Alignment.Center
+                .background(if (isRouteActive) PackSyncTheme.colors.surfaceRaised else PackSyncTheme.colors.surface)
+                .border(
+                    width = 1.5.dp,
+                    color = if (isRouteActive) Color(0xFF00B0FF) else PackSyncTheme.colors.border,
+                    shape = CircleShape
+                )
         ) {
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.AltRoute,
-                contentDescription = "Toggle Route",
-                tint = routeIconColor,
+                contentDescription = "Route",
+                tint = if (isRouteActive) Color(0xFF00B0FF) else PackSyncTheme.colors.textSecondary,
                 modifier = Modifier.size(22.dp)
             )
         }
 
-        // 3. Recenter-on-me button
-        Box(
+        // 3. Recenter on Me Button
+        IconButton(
+            onClick = onRecenterClick,
             modifier = Modifier
-                .size(50.dp)
-                .shadow(
-                    elevation = 8.dp,
-                    shape = CircleShape,
-                    spotColor = BikerAmber.copy(alpha = 0.35f),
-                    ambientColor = Color.Black
-                )
+                .size(54.dp)
                 .clip(CircleShape)
-                .background(Color(0xEE14171E))
-                .background(BikerAmber.copy(alpha = 0.08f))
-                .border(1.5.dp, BikerAmber.copy(alpha = 0.6f), CircleShape)
-                .clickable(onClick = onRecenterClick),
-            contentAlignment = Alignment.Center
+                .background(PackSyncTheme.colors.surface)
+                .border(1.5.dp, PackSyncTheme.colors.liveGreen.copy(alpha = 0.6f), CircleShape)
         ) {
             Icon(
                 imageVector = Icons.Default.MyLocation,
-                contentDescription = "Recenter on Me",
-                tint = BikerAmber,
+                contentDescription = "Recenter",
+                tint = PackSyncTheme.colors.liveGreen,
                 modifier = Modifier.size(22.dp)
-            )
-        }
-    }
-}
-
-@Preview(showBackground = true, backgroundColor = 0xFF101216)
-@Composable
-fun TopRideBarPreview() {
-    RideSafeTheme {
-        Box(modifier = Modifier.padding(16.dp)) {
-            TopRideBar(
-                rideCode = "CREW47",
-                riderCount = 5,
-                onCopyCode = {},
-                onLeaveClick = {}
-            )
-        }
-    }
-}
-
-@Preview(showBackground = true, backgroundColor = 0xFF101216)
-@Composable
-fun BottomControlDockPreview() {
-    RideSafeTheme {
-        Box(modifier = Modifier.padding(16.dp)) {
-            BottomControlDock(
-                myStatus = RiderStatus.RIDING,
-                isRouteVisible = true,
-                hasPlannedRoute = true,
-                onStatusClick = {},
-                onRiderListClick = {},
-                onToggleRouteClick = {},
-                onRecenterClick = {}
             )
         }
     }
