@@ -223,9 +223,7 @@ fun HomeScreen(
         onRetryRouteCalculation = viewModel::calculateRoute,
         onCreateRideWithRoute = {
             viewModel.createRideWithPlannedTrip(context, onRideJoined)
-        },
-        onCancelJoinRequest = viewModel::cancelJoinRequest,
-        onDismissDeclinedDialog = viewModel::dismissDeclinedDialog
+        }
     )
 }
 
@@ -255,9 +253,7 @@ fun HomeScreenContent(
     onClearStartPlace: () -> Unit = {},
     onClearDestPlace: () -> Unit = {},
     onRetryRouteCalculation: () -> Unit = {},
-    onCreateRideWithRoute: () -> Unit = {},
-    onCancelJoinRequest: () -> Unit = {},
-    onDismissDeclinedDialog: () -> Unit = {}
+    onCreateRideWithRoute: () -> Unit = {}
 ) {
     val colors = PackSyncTheme.colors
     val focusManager = LocalFocusManager.current
@@ -269,145 +265,6 @@ fun HomeScreenContent(
 
     var sessionToDelete by remember { mutableStateOf<LocalRideSessionUi?>(null) }
 
-    // ── Waiting for Leader Approval Dialog (Fix 2) ──
-    if (uiState.isWaitingForApproval) {
-        val minutes = uiState.approvalTimeRemaining / 60
-        val seconds = uiState.approvalTimeRemaining % 60
-        val timeFormatted = String.format("%d:%02d", minutes, seconds)
-
-        AlertDialog(
-            onDismissRequest = { /* Require explicit click on Cancel button */ },
-            shape = RoundedCornerShape(20.dp),
-            containerColor = colors.surfaceRaised,
-            title = {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .background(StatusAmber.copy(alpha = 0.15f), CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(20.dp),
-                            strokeWidth = 2.dp,
-                            color = StatusAmber
-                        )
-                    }
-                    Text(
-                        text = "Waiting for Approval",
-                        style = MaterialTheme.typography.titleLarge,
-                        color = colors.textPrimary,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            },
-            text = {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = "Joining Convoy",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = colors.textTertiary
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = uiState.pendingJoinCode,
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = StatusAmber,
-                        letterSpacing = 4.sp
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = "The convoy leader or active riders must approve your request before you can join.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = colors.textSecondary,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                    )
-                    Spacer(modifier = Modifier.height(14.dp))
-                    Text(
-                        text = "Auto-expiring in $timeFormatted",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = colors.textTertiary,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-            },
-            confirmButton = {},
-            dismissButton = {
-                OutlinedButton(
-                    onClick = onCancelJoinRequest,
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = colors.destructiveRed
-                    ),
-                    border = BorderStroke(1.dp, colors.destructiveRed.copy(alpha = 0.5f))
-                ) {
-                    Text("Cancel Request", fontWeight = FontWeight.SemiBold)
-                }
-            }
-        )
-    }
-
-    // ── Leader Declined Pop-up Dialog (Fix 2) ──
-    if (uiState.declinedDialogMessage != null) {
-        AlertDialog(
-            onDismissRequest = onDismissDeclinedDialog,
-            shape = RoundedCornerShape(20.dp),
-            containerColor = colors.surfaceRaised,
-            title = {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .background(colors.destructiveRed.copy(alpha = 0.15f), CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = null,
-                            tint = colors.destructiveRed,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                    Text(
-                        text = "Request Declined",
-                        style = MaterialTheme.typography.titleLarge,
-                        color = colors.textPrimary,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            },
-            text = {
-                Text(
-                    text = uiState.declinedDialogMessage ?: "The leader has declined your joing request",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = colors.textSecondary
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = onDismissDeclinedDialog,
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = colors.primaryButtonBg,
-                        contentColor = colors.primaryButtonText
-                    )
-                ) {
-                    Text("OK", fontWeight = FontWeight.Bold)
-                }
-            }
-        )
-    }
 
     // Delete confirmation dialog
     if (sessionToDelete != null) {

@@ -23,8 +23,6 @@ class RideSafeApp : Application() {
         const val LOCATION_CHANNEL_ID = "location_tracking_channel"
         // Notification channel ID for critical emergency alerts
         const val EMERGENCY_CHANNEL_ID = "emergency_alerts_channel"
-        // Notification channel ID for ride join permission requests and updates
-        const val JOIN_REQUEST_CHANNEL_ID = "join_requests_channel"
     }
 
     override fun onCreate() {
@@ -84,21 +82,6 @@ class RideSafeApp : Application() {
                 setShowBadge(true)
             }
             notificationManager.createNotificationChannel(emergencyChannel)
-
-            // 3. Join Request Alert channel (high importance, heads-up display for approvals)
-            val joinChannel = NotificationChannel(
-                JOIN_REQUEST_CHANNEL_ID,
-                "PackSync Join Requests",
-                NotificationManager.IMPORTANCE_HIGH
-            ).apply {
-                description = "Approval requests and status updates for riders joining your convoy"
-                enableVibration(true)
-                vibrationPattern = longArrayOf(0, 300, 150, 300)
-                enableLights(true)
-                lightColor = android.graphics.Color.YELLOW
-                setShowBadge(true)
-            }
-            notificationManager.createNotificationChannel(joinChannel)
         }
     }
 }

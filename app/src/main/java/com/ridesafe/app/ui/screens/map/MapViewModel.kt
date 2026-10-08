@@ -11,14 +11,12 @@ import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
-import com.ridesafe.app.data.model.JoinRequest
 import com.ridesafe.app.data.model.RideSession
 import com.ridesafe.app.data.model.Rider
 import com.ridesafe.app.data.model.RiderStatus
 import com.ridesafe.app.data.model.TripInfo
 import com.ridesafe.app.data.repository.RideRepository
 import com.ridesafe.app.service.LocationTrackingService
-import com.ridesafe.app.util.JoinNotificationHelper
 import com.ridesafe.app.util.LocationUtils
 import com.ridesafe.app.util.PolylineUtils
 import org.osmdroid.util.GeoPoint
@@ -61,10 +59,7 @@ data class MapUiState(
     val isStatusPickerOpen: Boolean = false,
     val isRiderListOpen: Boolean = false,
     val isLoading: Boolean = false,
-    val errorMessage: String? = null,
-    // Leader / Present Rider Join Request Pop-up (Fix 2)
-    val activeJoinRequest: JoinRequest? = null,
-    val joinRequestTimeRemaining: Int = 120
+    val errorMessage: String? = null
 )
 
 class MapViewModel(
@@ -77,16 +72,11 @@ class MapViewModel(
 
     private var riderObservationJob: Job? = null
     private var tripObservationJob: Job? = null
-    private var sessionObservationJob: Job? = null
-    private var joinRequestsObservationJob: Job? = null
-    private var joinRequestTimerJob: Job? = null
     private var fusedClient: FusedLocationProviderClient? = null
     private var locationCallback: LocationCallback? = null
     private var lastKnownHeading: Float? = null
     private var localCurrentLocation: Rider? = null
     private var latestFirebaseRiders: List<Rider> = emptyList()
-    private var currentSessionCreatorId: String = ""
-    private var latestJoinRequests: List<JoinRequest> = emptyList()
 
     /**
      * Initializes the map session for a given rideCode and rider.
@@ -137,10 +127,6 @@ class MapViewModel(
 
         // Start listening to planned trip route from Firebase
         observeTripInfo(cleanCode)
-
-        // Observe session creator and incoming join requests (Fix 2)
-        observeSession(cleanCode)
-        observeJoinRequests(cleanCode)
     }
 
 
@@ -252,7 +238,6 @@ class MapViewModel(
                 .collect { ridersList ->
                     latestFirebaseRiders = ridersList
                     updateRidersWithLocalLocation()
-                    evaluateJoinRequests()
                 }
         }
     }
@@ -437,125 +422,6 @@ class MapViewModel(
         _uiState.update { it.copy(selectedRider = rider) }
     }
 
-    // ── Join Request Approval Handling (Fix 2) ──────────────────────────
-
-    private fun observeSession(rideCode: String) {
-        sessionObservationJob?.cancel()
-        sessionObservationJob = viewModelScope.launch {
-            repository.observeSession(rideCode)
-                .catch { error -> Log.w("RideSafeDebug", "observeSession error: ${error.message}") }
-                .collect { session ->
-                    currentSessionCreatorId = session?.createdBy ?: ""
-                    evaluateJoinRequests()
-                }
-        }
-    }
-
-    private fun observeJoinRequests(rideCode: String) {
-        joinRequestsObservationJob?.cancel()
-        joinRequestsObservationJob = viewModelScope.launch {
-            repository.observeJoinRequests(rideCode)
-                .catch { error -> Log.w("RideSafeDebug", "observeJoinRequests error: ${error.message}") }
-                .collect { requests ->
-                    latestJoinRequests = requests
-                    evaluateJoinRequests()
-                }
-        }
-    }
-
-    private fun evaluateJoinRequests() {
-        val myId = _uiState.value.currentRiderId
-        if (myId.isEmpty() || latestFirebaseRiders.isEmpty()) return
-
-        val isCreatorActive = latestFirebaseRiders.any { it.id == currentSessionCreatorId }
-        val shouldIHandle = if (isCreatorActive) {
-            // Convoy creator is active: only creator receives pop-up & notification
-            myId == currentSessionCreatorId
-        } else {
-            // Creator is NOT present: any active convoy rider receives pop-up & notification
-            latestFirebaseRiders.any { it.id == myId }
-        }
-
-        if (!shouldIHandle) {
-            val currentReq = _uiState.value.activeJoinRequest
-            if (currentReq != null) {
-                JoinNotificationHelper.cancelJoinRequestNotification(getApplication(), currentReq.riderId)
-                joinRequestTimerJob?.cancel()
-                _uiState.update { it.copy(activeJoinRequest = null) }
-            }
-            return
-        }
-
-        // Pick latest pending join request that is within the 120s window
-        val now = System.currentTimeMillis()
-        val candidate = latestJoinRequests.firstOrNull { req ->
-            req.isPending && (now - req.timestamp <= 120_000L)
-        }
-
-        if (candidate != null) {
-            val elapsed = now - candidate.timestamp
-            val remainingSeconds = ((120_000L - elapsed) / 1000L).coerceIn(1L, 120L).toInt()
-            val isNewRequest = _uiState.value.activeJoinRequest?.id != candidate.id
-
-            if (isNewRequest) {
-                _uiState.update {
-                    it.copy(
-                        activeJoinRequest = candidate,
-                        joinRequestTimeRemaining = remainingSeconds
-                    )
-                }
-
-                // Show heads-up notification with Approve & Decline actions (Fix 2)
-                JoinNotificationHelper.showJoinRequestNotification(getApplication(), candidate)
-
-                // Start 2-minute countdown timer
-                joinRequestTimerJob?.cancel()
-                joinRequestTimerJob = viewModelScope.launch {
-                    for (sec in remainingSeconds downTo 0) {
-                        delay(1000L)
-                        _uiState.update { it.copy(joinRequestTimeRemaining = sec) }
-                    }
-                    // Auto-decline when 2 minutes elapse
-                    declineJoinRequest(candidate)
-                }
-            }
-        } else {
-            val currentReq = _uiState.value.activeJoinRequest
-            if (currentReq != null) {
-                JoinNotificationHelper.cancelJoinRequestNotification(getApplication(), currentReq.riderId)
-                joinRequestTimerJob?.cancel()
-                _uiState.update { it.copy(activeJoinRequest = null) }
-            }
-        }
-    }
-
-    fun approveJoinRequest(request: JoinRequest) {
-        val rideCode = _uiState.value.rideCode
-        val myId = _uiState.value.currentRiderId
-        joinRequestTimerJob?.cancel()
-        JoinNotificationHelper.cancelJoinRequestNotification(getApplication(), request.riderId)
-        _uiState.update { it.copy(activeJoinRequest = null) }
-        repository.respondToJoinRequest(rideCode, request.riderId, approved = true, responderId = myId)
-    }
-
-    fun declineJoinRequest(request: JoinRequest) {
-        val rideCode = _uiState.value.rideCode
-        val myId = _uiState.value.currentRiderId
-        joinRequestTimerJob?.cancel()
-        JoinNotificationHelper.cancelJoinRequestNotification(getApplication(), request.riderId)
-        _uiState.update { it.copy(activeJoinRequest = null) }
-        repository.respondToJoinRequest(rideCode, request.riderId, approved = false, responderId = myId)
-    }
-
-    fun dismissJoinRequest() {
-        joinRequestTimerJob?.cancel()
-        val currentReq = _uiState.value.activeJoinRequest
-        if (currentReq != null) {
-            JoinNotificationHelper.cancelJoinRequestNotification(getApplication(), currentReq.riderId)
-        }
-        _uiState.update { it.copy(activeJoinRequest = null) }
-    }
-
     /**
      * Leaves the ride session cleanly, stops the foreground service, and clears observers.
      */
@@ -576,17 +442,6 @@ class MapViewModel(
         riderObservationJob = null
         tripObservationJob?.cancel()
         tripObservationJob = null
-        sessionObservationJob?.cancel()
-        sessionObservationJob = null
-        joinRequestsObservationJob?.cancel()
-        joinRequestsObservationJob = null
-        joinRequestTimerJob?.cancel()
-        joinRequestTimerJob = null
-
-        val currentReq = _uiState.value.activeJoinRequest
-        if (currentReq != null) {
-            JoinNotificationHelper.cancelJoinRequestNotification(getApplication(), currentReq.riderId)
-        }
 
         // 4. Remove rider from Firebase asynchronously
         if (rideCode.isNotEmpty() && riderId.isNotEmpty()) {
@@ -601,13 +456,6 @@ class MapViewModel(
         super.onCleared()
         riderObservationJob?.cancel()
         tripObservationJob?.cancel()
-        sessionObservationJob?.cancel()
-        joinRequestsObservationJob?.cancel()
-        joinRequestTimerJob?.cancel()
-        val currentReq = _uiState.value.activeJoinRequest
-        if (currentReq != null) {
-            JoinNotificationHelper.cancelJoinRequestNotification(getApplication(), currentReq.riderId)
-        }
         locationCallback?.let { callback ->
             fusedClient?.removeLocationUpdates(callback)
         }

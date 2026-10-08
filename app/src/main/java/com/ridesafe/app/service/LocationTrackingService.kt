@@ -27,7 +27,6 @@ import com.ridesafe.app.RideSafeApp
 import com.ridesafe.app.data.model.Rider
 import com.ridesafe.app.data.model.RiderStatus
 import com.ridesafe.app.data.repository.RideRepository
-import com.ridesafe.app.util.JoinNotificationHelper
 import com.ridesafe.app.util.LocationUtils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -60,10 +59,6 @@ class LocationTrackingService : Service() {
 
     // Emergency tracking
     private var emergencyObservationJob: Job? = null
-    private var joinRequestObservationJob: Job? = null
-    private var sessionObservationJob: Job? = null
-    private var currentSessionCreatorId: String = ""
-    private var latestConvoyRiders: List<Rider> = emptyList()
     private val activeEmergencyRiders = mutableMapOf<String, Rider>()
     private var lastKnownLat: Double = 0.0
     private var lastKnownLng: Double = 0.0
@@ -142,7 +137,6 @@ class LocationTrackingService : Service() {
                 startInForeground()
                 startLocationUpdates()
                 startObservingEmergencyAlerts()
-                startObservingJoinRequests()
             }
             ACTION_UPDATE_STATUS -> {
                 val statusName = intent.getStringExtra(EXTRA_STATUS)
@@ -160,7 +154,6 @@ class LocationTrackingService : Service() {
             ACTION_STOP -> {
                 stopLocationUpdates()
                 clearEmergencyAlerts()
-                stopObservingJoinRequests()
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
             }
@@ -243,7 +236,6 @@ class LocationTrackingService : Service() {
     }
 
     private fun handleRidersEmergencyStatus(riders: List<Rider>) {
-        latestConvoyRiders = riders
         val notificationManager = getSystemService(NotificationManager::class.java) ?: return
 
         // Filter other riders currently in EMERGENCY state
@@ -369,47 +361,6 @@ class LocationTrackingService : Service() {
         activeEmergencyRiders.clear()
     }
 
-    private fun startObservingJoinRequests() {
-        joinRequestObservationJob?.cancel()
-        sessionObservationJob?.cancel()
-        if (currentRideCode.isEmpty()) return
-
-        sessionObservationJob = serviceScope.launch {
-            repository.observeSession(currentRideCode)
-                .catch { }
-                .collect { session ->
-                    currentSessionCreatorId = session?.createdBy ?: ""
-                }
-        }
-
-        joinRequestObservationJob = serviceScope.launch {
-            repository.observeJoinRequests(currentRideCode)
-                .catch { }
-                .collect { requests ->
-                    val isCreatorActive = latestConvoyRiders.any { it.id == currentSessionCreatorId }
-                    val shouldIHandle = if (isCreatorActive) {
-                        currentRiderId == currentSessionCreatorId
-                    } else {
-                        latestConvoyRiders.any { it.id == currentRiderId }
-                    }
-
-                    if (shouldIHandle) {
-                        val now = System.currentTimeMillis()
-                        val pending = requests.filter { it.isPending && (now - it.timestamp <= 120_000L) }
-                        for (req in pending) {
-                            JoinNotificationHelper.showJoinRequestNotification(this@LocationTrackingService, req)
-                        }
-                    }
-                }
-        }
-    }
-
-    private fun stopObservingJoinRequests() {
-        joinRequestObservationJob?.cancel()
-        joinRequestObservationJob = null
-        sessionObservationJob?.cancel()
-        sessionObservationJob = null
-    }
 
     @SuppressLint("MissingPermission")
     private fun startLocationUpdates() {
